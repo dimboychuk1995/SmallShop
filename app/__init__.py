@@ -1,11 +1,13 @@
 from flask import Flask
+from app.config import Config
+from app.extensions import init_mongo
 
 def create_app():
     app = Flask(__name__)
-
-    # Import Config INSIDE factory (fixes circular import issues)
-    from app.config import Config
     app.config.from_object(Config)
+
+    # Mongo init + master indexes
+    init_mongo(app)
 
     # Blueprints
     from app.blueprints.main import main_bp
