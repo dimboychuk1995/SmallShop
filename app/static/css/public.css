@@ -1,0 +1,28 @@
+/* Минимальная базовая читаемость. Дизайн сделаем позже. */
+
+body {
+  font-family: Arial, sans-serif;
+  margin: 16px;
+  line-height: 1.4;
+}
+
+fieldset {
+  margin: 12px 0;
+  padding: 12px;
+}
+
+input, select, button {
+  margin: 6px 0 12px 0;
+  padding: 6px;
+  min-width: 260px;
+}
+
+button {
+  min-width: auto;
+  padding: 8px 12px;
+}
+
+small {
+  display: block;
+  color: #555;
+}

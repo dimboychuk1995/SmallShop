@@ -1,0 +1,165 @@
+{% extends "layouts/public_base.html" %}
+
+{% block title %}Login / Create Tenant{% endblock %}
+
+{% block content %}
+  <h1>Вход / Регистрация нового тенанта</h1>
+
+  <p>
+    Это временная “нулевая” страница. Дизайн добавим позже.
+    Сейчас — только структура форм и названия полей.
+  </p>
+
+  <hr>
+
+  <section aria-labelledby="login-title">
+    <h2 id="login-title">Вход</h2>
+
+    <form method="post" action="/login" autocomplete="on">
+      <fieldset>
+        <legend>Данные для входа</legend>
+
+        <div>
+          <label for="login_tenant_slug">Tenant (slug или домен)</label><br>
+          <input
+            id="login_tenant_slug"
+            name="tenant"
+            type="text"
+            placeholder="например: globeks или ltsrepair"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="login_email">Email</label><br>
+          <input
+            id="login_email"
+            name="email"
+            type="email"
+            placeholder="you@company.com"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="login_password">Password</label><br>
+          <input
+            id="login_password"
+            name="password"
+            type="password"
+            required
+          />
+        </div>
+
+        <div>
+          <label>
+            <input name="remember" type="checkbox" value="1" />
+            Remember me
+          </label>
+        </div>
+
+        <button type="submit">Login</button>
+      </fieldset>
+    </form>
+
+    <p>
+      <a href="/forgot-password">Forgot password?</a>
+    </p>
+  </section>
+
+  <hr>
+
+  <section aria-labelledby="tenant-title">
+    <h2 id="tenant-title">Создать нового тенанта (регистрация компании)</h2>
+
+    <form method="post" action="/tenant/register" autocomplete="on">
+      <fieldset>
+        <legend>Информация о компании</legend>
+
+        <div>
+          <label for="tenant_name">Company name</label><br>
+          <input
+            id="tenant_name"
+            name="tenant_name"
+            type="text"
+            placeholder="Globeks Corp"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="tenant_slug">Tenant slug</label><br>
+          <input
+            id="tenant_slug"
+            name="tenant_slug"
+            type="text"
+            placeholder="globeks"
+            pattern="[a-z0-9-]{3,32}"
+            required
+          />
+          <small>Только латиница, цифры, дефис. 3–32 символа.</small>
+        </div>
+
+        <div>
+          <label for="tenant_timezone">Timezone</label><br>
+          <select id="tenant_timezone" name="tenant_timezone" required>
+            <option value="">-- select --</option>
+            <option value="America/Chicago">America/Chicago</option>
+            <option value="America/New_York">America/New_York</option>
+            <option value="America/Los_Angeles">America/Los_Angeles</option>
+            <option value="UTC">UTC</option>
+          </select>
+          <small>Потом подтянем полный список из API.</small>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Админ пользователь (первый аккаунт)</legend>
+
+        <div>
+          <label for="admin_name">Full name</label><br>
+          <input
+            id="admin_name"
+            name="admin_name"
+            type="text"
+            placeholder="Dmytro Boichuk"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="admin_email">Admin email</label><br>
+          <input
+            id="admin_email"
+            name="admin_email"
+            type="email"
+            placeholder="admin@company.com"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="admin_password">Password</label><br>
+          <input
+            id="admin_password"
+            name="admin_password"
+            type="password"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="admin_password2">Repeat password</label><br>
+          <input
+            id="admin_password2"
+            name="admin_password2"
+            type="password"
+            required
+          />
+        </div>
+
+        <button type="submit">Create tenant</button>
+      </fieldset>
+    </form>
+  </section>
+{% endblock %}
