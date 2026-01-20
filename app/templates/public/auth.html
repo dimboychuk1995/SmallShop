@@ -1,31 +1,33 @@
 {% extends "layouts/public_base.html" %}
 
-{% block title %}Login / Create Tenant{% endblock %}
+{% block title %}Login / Registration{% endblock %}
 
 {% block content %}
-  <h1>Вход / Регистрация нового тенанта</h1>
+  <h1>Login / Registration</h1>
 
   <p>
-    Это временная “нулевая” страница. Дизайн добавим позже.
-    Сейчас — только структура форм и названия полей.
+    Пока без дизайна. Только форма и поля. Бэк-логика позже.
   </p>
 
   <hr>
 
+  <!-- LOGIN -->
   <section aria-labelledby="login-title">
-    <h2 id="login-title">Вход</h2>
+    <h2 id="login-title">Login</h2>
 
     <form method="post" action="/login" autocomplete="on">
       <fieldset>
-        <legend>Данные для входа</legend>
+        <legend>Login details</legend>
 
+        <!-- Я оставил Company/Tenant, потому что иначе непонятно к какому тенанту логиниться.
+             Если позже решишь, что email глобально уникальный — это поле уберём. -->
         <div>
-          <label for="login_tenant_slug">Tenant (slug или домен)</label><br>
+          <label for="login_company">Company (tenant)</label><br>
           <input
-            id="login_tenant_slug"
-            name="tenant"
+            id="login_company"
+            name="company"
             type="text"
-            placeholder="например: globeks или ltsrepair"
+            placeholder="Company name or tenant slug"
             required
           />
         </div>
@@ -51,13 +53,6 @@
           />
         </div>
 
-        <div>
-          <label>
-            <input name="remember" type="checkbox" value="1" />
-            Remember me
-          </label>
-        </div>
-
         <button type="submit">Login</button>
       </fieldset>
     </form>
@@ -69,69 +64,78 @@
 
   <hr>
 
-  <section aria-labelledby="tenant-title">
-    <h2 id="tenant-title">Создать нового тенанта (регистрация компании)</h2>
+  <!-- REGISTRATION -->
+  <section aria-labelledby="register-title">
+    <h2 id="register-title">Registration</h2>
 
     <form method="post" action="/tenant/register" autocomplete="on">
       <fieldset>
-        <legend>Информация о компании</legend>
+        <legend>Company</legend>
 
         <div>
-          <label for="tenant_name">Company name</label><br>
+          <label for="company_name">Company name</label><br>
           <input
-            id="tenant_name"
-            name="tenant_name"
+            id="company_name"
+            name="company_name"
             type="text"
-            placeholder="Globeks Corp"
+            placeholder="Small Shop LLC"
             required
           />
         </div>
 
         <div>
-          <label for="tenant_slug">Tenant slug</label><br>
-          <input
-            id="tenant_slug"
-            name="tenant_slug"
-            type="text"
-            placeholder="globeks"
-            pattern="[a-z0-9-]{3,32}"
+          <label for="company_address">Company address</label><br>
+          <textarea
+            id="company_address"
+            name="company_address"
+            rows="3"
+            placeholder="Street, City, State, ZIP"
             required
-          />
-          <small>Только латиница, цифры, дефис. 3–32 символа.</small>
+          ></textarea>
         </div>
 
         <div>
-          <label for="tenant_timezone">Timezone</label><br>
-          <select id="tenant_timezone" name="tenant_timezone" required>
-            <option value="">-- select --</option>
-            <option value="America/Chicago">America/Chicago</option>
-            <option value="America/New_York">America/New_York</option>
-            <option value="America/Los_Angeles">America/Los_Angeles</option>
-            <option value="UTC">UTC</option>
-          </select>
-          <small>Потом подтянем полный список из API.</small>
+          <label for="company_phone">Phone number</label><br>
+          <input
+            id="company_phone"
+            name="company_phone"
+            type="tel"
+            placeholder="+1 (555) 555-5555"
+            required
+          />
         </div>
       </fieldset>
 
       <fieldset>
-        <legend>Админ пользователь (первый аккаунт)</legend>
+        <legend>Owner (first user)</legend>
 
         <div>
-          <label for="admin_name">Full name</label><br>
+          <label for="first_name">First name</label><br>
           <input
-            id="admin_name"
-            name="admin_name"
+            id="first_name"
+            name="first_name"
             type="text"
-            placeholder="Dmytro Boichuk"
+            placeholder="Dmytro"
             required
           />
         </div>
 
         <div>
-          <label for="admin_email">Admin email</label><br>
+          <label for="last_name">Last name</label><br>
           <input
-            id="admin_email"
-            name="admin_email"
+            id="last_name"
+            name="last_name"
+            type="text"
+            placeholder="Boichuk"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="reg_email">Email</label><br>
+          <input
+            id="reg_email"
+            name="email"
             type="email"
             placeholder="admin@company.com"
             required
@@ -139,26 +143,16 @@
         </div>
 
         <div>
-          <label for="admin_password">Password</label><br>
+          <label for="reg_password">Password</label><br>
           <input
-            id="admin_password"
-            name="admin_password"
+            id="reg_password"
+            name="password"
             type="password"
             required
           />
         </div>
 
-        <div>
-          <label for="admin_password2">Repeat password</label><br>
-          <input
-            id="admin_password2"
-            name="admin_password2"
-            type="password"
-            required
-          />
-        </div>
-
-        <button type="submit">Create tenant</button>
+        <button type="submit">Create account</button>
       </fieldset>
     </form>
   </section>
