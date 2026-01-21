@@ -1,0 +1,60 @@
+{% extends "layouts/public_base.html" %}
+
+{% block title %}{% block page_title %}App{% endblock %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Top header -->
+  <nav class="navbar navbar-expand-lg bg-light border rounded px-3 mb-3">
+    <div class="container-fluid px-0">
+      <a class="navbar-brand fw-semibold" href="{{ url_for('main.dashboard') }}">Small Shop</a>
+
+      <div class="ms-auto d-flex align-items-center gap-3">
+        <div class="text-end">
+          <div class="small text-muted">Logged in</div>
+          <div class="fw-semibold">{{ app_user_display or "—" }}</div>
+        </div>
+
+        <div class="text-end">
+          <div class="small text-muted">Organization</div>
+          <div class="fw-semibold">{{ app_tenant_display or "—" }}</div>
+        </div>
+
+        <a class="btn btn-outline-danger btn-sm" href="{{ url_for('auth.logout') }}">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="row g-3">
+
+    <!-- Sidebar -->
+    <div class="col-12 col-md-3 col-lg-2">
+      <div class="card">
+        <div class="card-header">Navigation</div>
+
+        <div class="list-group list-group-flush">
+          {% for item in nav_items %}
+            {% set is_active = (active_page == item.key) %}
+            <a
+              href="{{ url_for(item.endpoint) }}"
+              class="list-group-item list-group-item-action {% if is_active %}active{% endif %}"
+              {% if is_active %}aria-current="page"{% endif %}
+            >
+              {{ item.label }}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Main -->
+    <div class="col-12 col-md-9 col-lg-10">
+      {% block app_content %}
+      <!-- Page content goes here -->
+      {% endblock %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
