@@ -7,18 +7,20 @@ SESSION_USER_ID = "user_id"
 SESSION_TENANT_ID = "tenant_id"
 SESSION_TENANT_DB = "tenant_db_name"
 
-def login_user(user_id, tenant_id, tenant_db_name: str):
+def login_user(user_id: str, tenant_id: str, tenant_db_name: str) -> None:
     session[SESSION_USER_ID] = str(user_id)
     session[SESSION_TENANT_ID] = str(tenant_id)
     session[SESSION_TENANT_DB] = tenant_db_name
+    session.modified = True
 
-def logout_user():
+def logout_user() -> None:
     session.pop(SESSION_USER_ID, None)
     session.pop(SESSION_TENANT_ID, None)
     session.pop(SESSION_TENANT_DB, None)
+    session.modified = True
 
 def is_logged_in() -> bool:
-    return SESSION_USER_ID in session and SESSION_TENANT_ID in session
+    return bool(session.get(SESSION_USER_ID)) and bool(session.get(SESSION_TENANT_ID))
 
 def login_required(view_func):
     @wraps(view_func)

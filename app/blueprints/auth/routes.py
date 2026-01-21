@@ -28,9 +28,9 @@ def login():
         flash("Wrong password.", "error")
         return redirect(url_for("main.index"))
 
-    tenant = master.tenants.find_one({"_id": user["tenant_id"]})
-    if not tenant or tenant.get("status") != "active":
-        flash("Tenant is not active or not found.", "error")
+    tenant = master.tenants.find_one({"_id": user["tenant_id"], "status": "active"})
+    if not tenant:
+        flash("Tenant not found or inactive.", "error")
         return redirect(url_for("main.index"))
 
     login_user(user["_id"], tenant["_id"], tenant.get("db_name", ""))

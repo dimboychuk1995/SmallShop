@@ -1,18 +1,22 @@
-from flask import render_template, session
-from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_TENANT_DB
+from flask import render_template, g
+from app.utils.auth import login_required
 from . import main_bp
+
 
 @main_bp.get("/")
 def index():
     return render_template("public/auth.html")
 
+
 @main_bp.get("/dashboard")
 @login_required
 def dashboard():
+    # теперь это “понимание” есть всегда: g.user и g.tenant
+    u = g.user
+    t = g.tenant
     return (
         "Dashboard OK<br>"
-        f"user_id: {session.get(SESSION_USER_ID)}<br>"
-        f"tenant_id: {session.get(SESSION_TENANT_ID)}<br>"
-        f"tenant_db: {session.get(SESSION_TENANT_DB)}<br><br>"
+        f"User: {u.get('email')} ({u.get('name')})<br>"
+        f"Tenant: {t.get('name')} / db: {t.get('db_name')}<br><br>"
         '<a href="/logout">Logout</a>'
     )
