@@ -6,7 +6,7 @@
   <h1>Login / Registration</h1>
 
   <p>
-    Пока без дизайна. Только форма и поля. Бэк-логика позже.
+    Пока без дизайна. Только форма и поля. Бэк-логика постепенно.
   </p>
 
   <hr>
@@ -18,19 +18,6 @@
     <form method="post" action="/login" autocomplete="on">
       <fieldset>
         <legend>Login details</legend>
-
-        <!-- Я оставил Company/Tenant, потому что иначе непонятно к какому тенанту логиниться.
-             Если позже решишь, что email глобально уникальный — это поле уберём. -->
-        <div>
-          <label for="login_company">Company (tenant)</label><br>
-          <input
-            id="login_company"
-            name="company"
-            type="text"
-            placeholder="Company name or tenant slug"
-            required
-          />
-        </div>
 
         <div>
           <label for="login_email">Email</label><br>

@@ -14,16 +14,18 @@ def get_master_db():
     return client[current_app.config["MASTER_DB_NAME"]]
 
 def init_mongo(app):
-    """
-    Initializes MongoClient and ensures master indexes.
-    """
-    client = MongoClient(app.config["MONGO_URI"])
+    client = MongoClient(app.config["MONGO_URI"], serverSelectionTimeoutMS=5000)
     app.extensions["mongo_client"] = client
+
+    # fail fast if mongo not reachable
+    client.admin.command("ping")
 
     master_db = client[app.config["MASTER_DB_NAME"]]
 
-    # Ensure indexes (safe to call multiple times)
     master_db.tenants.create_index([("slug", ASCENDING)], unique=True, name="uniq_tenant_slug")
     master_db.tenants.create_index([("db_name", ASCENDING)], unique=True, name="uniq_tenant_db_name")
-    master_db.users.create_index([("tenant_id", ASCENDING), ("email", ASCENDING)], unique=True, name="uniq_user_email_per_tenant")
+
+    # NEW: global unique email (so login can be email+password only)
+    master_db.users.create_index([("email", ASCENDING)], unique=True, name="uniq_user_email_global")
+
     master_db.shops.create_index([("tenant_id", ASCENDING)], name="idx_shop_tenant_id")

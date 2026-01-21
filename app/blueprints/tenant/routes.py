@@ -59,16 +59,8 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
 
 @tenant_bp.post("/register")
 def register_tenant():
-    """
-    Registration flow:
-    - Insert into master.tenants (company info + slug + db_name)
-    - Insert into master.shops (single shop)
-    - Insert into master.users (first user = owner)
-    - Create separate tenant database by name
-    """
     master = get_master_db()
 
-    # Read form fields
     company_name = (request.form.get("company_name") or "").strip()
     company_address = (request.form.get("company_address") or "").strip()
     company_phone = (request.form.get("company_phone") or "").strip()
@@ -78,7 +70,6 @@ def register_tenant():
     email = (request.form.get("email") or "").strip().lower()
     password = request.form.get("password") or ""
 
-    # Basic validation (minimal for now)
     errors = []
     if len(company_name) < 2:
         errors.append("Company name is required.")
@@ -98,24 +89,25 @@ def register_tenant():
     if errors:
         return jsonify({"ok": False, "errors": errors}), 400
 
-    # Generate slug + tenant DB name from company name
+    # NEW: email must be globally unique
+    if master.users.find_one({"email": email}):
+        return jsonify({"ok": False, "errors": ["Email already exists. Use another email."]}), 409
+
     tenant_slug = slugify_company_name(company_name)
     tenant_db_name = make_tenant_db_name(company_name)
 
     created_at = utcnow()
-
     tenant_id = None
     created_db = False
 
     try:
-        # 1) Create tenant in master DB
         tenant_doc = {
             "name": company_name,
             "slug": tenant_slug,
             "db_name": tenant_db_name,
             "address": company_address,
             "phone": company_phone,
-            "timezone": "America/Chicago",  # можно позже сделать выбор в форме
+            "timezone": "America/Chicago",
             "status": "active",
             "created_at": created_at,
             "updated_at": created_at,
@@ -123,7 +115,6 @@ def register_tenant():
         tenant_res = master.tenants.insert_one(tenant_doc)
         tenant_id = tenant_res.inserted_id
 
-        # 2) Create shop (single)
         shop_doc = {
             "tenant_id": tenant_id,
             "name": "Main Shop",
@@ -134,7 +125,6 @@ def register_tenant():
         shop_res = master.shops.insert_one(shop_doc)
         shop_id = shop_res.inserted_id
 
-        # 3) Create first user (owner)
         user_doc = {
             "tenant_id": tenant_id,
             "first_name": first_name,
@@ -149,7 +139,6 @@ def register_tenant():
         }
         master.users.insert_one(user_doc)
 
-        # 4) Create tenant database
         init_tenant_database(tenant_db_name, tenant_doc)
         created_db = True
 
@@ -164,8 +153,6 @@ def register_tenant():
         }), 201
 
     except DuplicateKeyError:
-        # Unique slug/db_name conflict
-        # Rollback inserted docs if any
         if tenant_id:
             master.users.delete_many({"tenant_id": tenant_id})
             master.shops.delete_many({"tenant_id": tenant_id})
@@ -177,13 +164,11 @@ def register_tenant():
         }), 409
 
     except Exception as e:
-        # Rollback master inserts
         if tenant_id:
             master.users.delete_many({"tenant_id": tenant_id})
             master.shops.delete_many({"tenant_id": tenant_id})
             master.tenants.delete_one({"_id": tenant_id})
 
-        # If tenant DB was created, drop it
         if created_db:
             client = get_mongo_client()
             client.drop_database(tenant_db_name)
