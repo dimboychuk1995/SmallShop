@@ -17,6 +17,7 @@ NAV_ITEMS = [
     {"key": "parts", "label": "Parts", "endpoint": "main.parts"},
     {"key": "work_orders", "label": "Work Orders", "endpoint": "main.work_orders"},
     {"key": "settings", "label": "Settings", "endpoint": "main.settings"},
+    {"key": "reports", "label": "Reports", "endpoint": "main.reports"},
 ]
 
 
@@ -108,3 +109,8 @@ def work_orders():
 @login_required
 def settings():
     return _render_app_page("public/settings.html", active_page="settings")
+
+@main_bp.get("/reports")
+@login_required
+def reports():
+    return _render_app_page("public/reports.html", active_page="reports")
