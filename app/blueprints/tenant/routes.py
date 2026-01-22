@@ -38,8 +38,9 @@ def make_tenant_db_name(company_name: str) -> str:
 
 def init_tenant_database(db_name: str, tenant_doc: dict):
     """
-    Creates tenant DB and seeds minimal defaults.
-    MongoDB creates DB lazily (on first write), so we write a settings doc.
+    Creates tenant DB and seeds defaults:
+    - settings
+    - roles (RBAC)
     """
     client = get_mongo_client()
     tdb = client[db_name]
@@ -53,8 +54,25 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
         "created_at": utcnow(),
     })
 
-    # Example indexes you’ll likely want later (safe to leave for now)
+    # Indexes
     tdb.settings.create_index("key", unique=True, name="uniq_settings_key")
+
+    # ---- Seed roles/permissions ----
+    from app.constants.permissions import build_default_roles
+
+    # roles indexes
+    tdb.roles.create_index("key", unique=True, name="uniq_roles_key")
+    tdb.roles.create_index("name", name="idx_roles_name")
+
+    # seed only if empty
+    if tdb.roles.count_documents({}) == 0:
+        now = utcnow()
+        roles = build_default_roles()
+        for r in roles:
+            r["created_at"] = now
+            r["updated_at"] = now
+        tdb.roles.insert_many(roles)
+
 
 
 @tenant_bp.post("/register")
