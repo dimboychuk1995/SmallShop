@@ -1,12 +1,81 @@
 {% extends "layouts/app_base.html" %}
-
 {% block page_title %}Settings{% endblock %}
 
 {% block app_content %}
-<div class="card">
+<div class="card mb-3">
   <div class="card-body">
-    <h1 class="h4 mb-2">Settings</h1>
-    <p class="text-muted mb-0">Empty page.</p>
+    <h1 class="h4 mb-1">Settings</h1>
+    <p class="text-muted mb-0">Choose a section. Each section is a separate page.</p>
   </div>
+</div>
+
+<div class="row g-3">
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('main.settings_organization') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Organization</h2>
+          <p class="text-muted mb-0">Company info, address, phone, timezone, logo.</p>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('main.settings_users') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Users</h2>
+          <p class="text-muted mb-0">Manage users, activation, invitations.</p>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('main.settings_roles') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Roles & Permissions</h2>
+          <p class="text-muted mb-0">Create roles and assign permissions.</p>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('main.settings_workflows') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Workflows</h2>
+          <p class="text-muted mb-0">Work order statuses, numbering, defaults.</p>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('main.settings_notifications') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Notifications</h2>
+          <p class="text-muted mb-0">Email/SMS rules and recipients.</p>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('main.settings_integrations') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Integrations</h2>
+          <p class="text-muted mb-0">Samsara, Mapbox, other services.</p>
+        </div>
+      </div>
+    </a>
+  </div>
+
 </div>
 {% endblock %}

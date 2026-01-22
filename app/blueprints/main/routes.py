@@ -2,6 +2,7 @@ from flask import render_template, session, redirect, url_for, flash
 from bson import ObjectId
 
 from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID
+from app.utils.permissions import permission_required
 from app.extensions import get_master_db
 from . import main_bp
 
@@ -109,6 +110,48 @@ def work_orders():
 @login_required
 def settings():
     return _render_app_page("public/settings.html", active_page="settings")
+
+@main_bp.get("/settings/organization")
+@login_required
+@permission_required("settings.manage_org")
+def settings_organization():
+    return _render_app_page("public/settings/organization.html", active_page="settings")
+
+
+@main_bp.get("/settings/users")
+@login_required
+@permission_required("settings.manage_users")
+def settings_users():
+    return _render_app_page("public/settings/users.html", active_page="settings")
+
+
+@main_bp.get("/settings/roles")
+@login_required
+@permission_required("settings.manage_roles")
+def settings_roles():
+    return _render_app_page("public/settings/roles.html", active_page="settings")
+
+
+@main_bp.get("/settings/workflows")
+@login_required
+@permission_required("settings.manage_org")
+def settings_workflows():
+    return _render_app_page("public/settings/workflows.html", active_page="settings")
+
+
+@main_bp.get("/settings/notifications")
+@login_required
+@permission_required("settings.manage_org")
+def settings_notifications():
+    return _render_app_page("public/settings/notifications.html", active_page="settings")
+
+
+@main_bp.get("/settings/integrations")
+@login_required
+@permission_required("settings.manage_org")
+def settings_integrations():
+    return _render_app_page("public/settings/integrations.html", active_page="settings")
+
 
 @main_bp.get("/reports")
 @login_required

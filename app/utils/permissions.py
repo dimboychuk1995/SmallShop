@@ -74,24 +74,22 @@ def get_effective_permissions():
         return g.effective_permissions
 
     user = _load_master_user()
-    if not user:
+    if user is None:
         g.effective_permissions = set()
         return g.effective_permissions
 
     tdb = get_tenant_db()
-    if not tdb:
+    if tdb is None:   # <-- ВАЖНО: только сравнение с None
         g.effective_permissions = set()
         return g.effective_permissions
 
     role_key = (user.get("role") or "viewer").strip().lower()
     role_doc = tdb.roles.find_one({"key": role_key})
 
-    # если owner — синхронизируем роль на новые permissions
     _sync_owner_role_permissions(tdb, role_doc)
 
     role_perms = set(role_doc.get("permissions") or []) if role_doc else set()
 
-    # overrides на пользователя (на будущее, можешь пока не заполнять)
     allow = set(user.get("allow_permissions") or [])
     deny = set(user.get("deny_permissions") or [])
 
