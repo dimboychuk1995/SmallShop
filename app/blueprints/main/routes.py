@@ -90,11 +90,13 @@ def _render_app_page(template_name: str, active_page: str):
 
 @main_bp.get("/dashboard")
 @login_required
+@permission_required("dashboard.view")
 def dashboard():
     return _render_app_page("public/dashboard.html", active_page="dashboard")
 
 
 @main_bp.get("/parts")
+@permission_required("parts.view")
 @login_required
 def parts():
     return _render_app_page("public/parts.html", active_page="parts")
@@ -102,12 +104,14 @@ def parts():
 
 @main_bp.get("/work-orders")
 @login_required
+@permission_required("work_orders.view")
 def work_orders():
     return _render_app_page("public/work_orders.html", active_page="work_orders")
 
 
 @main_bp.get("/settings")
 @login_required
+@permission_required("settings.view")
 def settings():
     return _render_app_page("public/settings.html", active_page="settings")
 
