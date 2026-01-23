@@ -122,13 +122,6 @@ def settings_organization():
     return _render_app_page("public/settings/organization.html", active_page="settings")
 
 
-@main_bp.get("/settings/users")
-@login_required
-@permission_required("settings.manage_users")
-def settings_users():
-    return _render_app_page("public/settings/users.html", active_page="settings")
-
-
 @main_bp.get("/settings/roles")
 @login_required
 @permission_required("settings.manage_roles")
