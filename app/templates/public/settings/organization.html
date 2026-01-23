@@ -2,17 +2,257 @@
 {% block page_title %}Settings — Organization{% endblock %}
 
 {% block app_content %}
+<!-- template: public/settings/organization.html -->
+
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h1 class="h4 mb-1">Organization</h1>
-    <p class="text-muted mb-0">Company info, timezone, etc.</p>
+    <p class="text-muted mb-0">Company profile, contacts, legal, billing, and preferences.</p>
   </div>
-  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.settings') }}">Back to Settings</a>
+
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.settings') }}">Back to Settings</a>
+    <button class="btn btn-outline-primary btn-sm" type="button" disabled>Edit (later)</button>
+  </div>
 </div>
 
-<div class="card">
-  <div class="card-body">
-    <p class="text-muted mb-0">Empty page.</p>
+<!-- Quick info -->
+<div class="alert alert-light border mb-3">
+  <div class="d-flex flex-column flex-md-row gap-2 justify-content-between">
+    <div>
+      <div class="fw-semibold">Tip</div>
+      <div class="text-muted small">
+        Later we’ll add: editing, logo upload, billing/tax fields, addresses, and audit history.
+      </div>
+    </div>
+    <div class="text-muted small">
+      Required permission: <span class="badge text-bg-secondary">settings.manage_org</span>
+    </div>
   </div>
 </div>
+
+<div class="row g-3">
+  <!-- Left column -->
+  <div class="col-12 col-lg-7">
+    <!-- Company details -->
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <div class="fw-semibold">Company details</div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Change</button>
+      </div>
+
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label">Company name</label>
+            <div class="form-control bg-light" id="org_company_name">
+              {{ tenant_name or "—" }}
+            </div>
+            <div class="form-text">This value comes from tenant session (read-only for now).</div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Display name (header)</label>
+            <div class="form-control bg-light" id="org_company_display">
+              {{ app_tenant_display or tenant_name or "—" }}
+            </div>
+            <div class="form-text">What you see in the top header.</div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Legal name</label>
+            <div class="form-control bg-light" id="org_legal_name">—</div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">DOT / MC</label>
+            <div class="form-control bg-light" id="org_dot_mc">—</div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Tax ID / EIN</label>
+            <div class="form-control bg-light" id="org_tax_id">—</div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Website</label>
+            <div class="form-control bg-light" id="org_website">—</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Notes</label>
+            <div class="form-control bg-light" style="min-height: 80px;" id="org_notes">
+              —
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Address -->
+    <div class="card mt-3">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <div class="fw-semibold">Address</div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Edit</button>
+      </div>
+
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Street</label>
+            <div class="form-control bg-light" id="org_street">—</div>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">City</label>
+            <div class="form-control bg-light" id="org_city">—</div>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">State</label>
+            <div class="form-control bg-light" id="org_state">—</div>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">ZIP</label>
+            <div class="form-control bg-light" id="org_zip">—</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Country</label>
+            <div class="form-control bg-light" id="org_country">—</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Time zone</label>
+            <div class="form-control bg-light" id="org_timezone">—</div>
+            <div class="form-text">We’ll connect this with your timezone settings later.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Billing -->
+    <div class="card mt-3">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <div class="fw-semibold">Billing</div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Manage</button>
+      </div>
+
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label">Billing email</label>
+            <div class="form-control bg-light" id="org_billing_email">—</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Billing phone</label>
+            <div class="form-control bg-light" id="org_billing_phone">—</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Billing address</label>
+            <div class="form-control bg-light" style="min-height: 60px;" id="org_billing_address">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right column -->
+  <div class="col-12 col-lg-5">
+    <!-- Primary contact -->
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <div class="fw-semibold">Primary contact</div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Edit</button>
+      </div>
+
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Contact person</label>
+            <div class="form-control bg-light" id="org_contact_name">—</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Email</label>
+            <div class="form-control bg-light" id="org_contact_email">
+              {{ user_email or "—" }}
+            </div>
+            <div class="form-text">For now we show current user email (read-only).</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Phone</label>
+            <div class="form-control bg-light" id="org_contact_phone">—</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Support / Dispatch phone</label>
+            <div class="form-control bg-light" id="org_support_phone">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preferences -->
+    <div class="card mt-3">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <div class="fw-semibold">Preferences</div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Change</button>
+      </div>
+
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Default currency</label>
+            <div class="form-control bg-light" id="org_currency">USD</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Date format</label>
+            <div class="form-control bg-light" id="org_date_format">MM/DD/YYYY</div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Units</label>
+            <div class="form-control bg-light" id="org_units">Miles / Gallons</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security / meta -->
+    <div class="card mt-3">
+      <div class="card-header">
+        <div class="fw-semibold">Meta</div>
+      </div>
+
+      <div class="card-body">
+        <div class="small text-muted mb-2">This section is informational (frontend only).</div>
+
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <tbody>
+              <tr>
+                <td class="text-muted">Tenant name (session)</td>
+                <td class="text-end fw-semibold">{{ tenant_name or "—" }}</td>
+              </tr>
+              <tr>
+                <td class="text-muted">Signed in as</td>
+                <td class="text-end fw-semibold">{{ (user_name or user_email) or "—" }}</td>
+              </tr>
+              <tr>
+                <td class="text-muted">Access</td>
+                <td class="text-end"><span class="badge text-bg-success">Allowed</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <hr class="my-3">
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-danger btn-sm" type="button" disabled>Deactivate organization (later)</button>
+          <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Export profile (later)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
