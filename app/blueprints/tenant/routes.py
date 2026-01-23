@@ -9,7 +9,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.extensions import get_master_db, get_mongo_client
 from . import tenant_bp
-
+import hashlib
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -20,12 +20,9 @@ def slugify_company_name(name: str) -> str:
     Convert company name to safe slug: a-z0-9-
     """
     s = (name or "").strip().lower()
-    # replace non-alnum with dash
     s = re.sub(r"[^a-z0-9]+", "-", s)
     s = s.strip("-")
-    # collapse multiple dashes
     s = re.sub(r"-{2,}", "-", s)
-    # enforce length
     if len(s) < 3:
         s = (s + "-tenant").strip("-")
     return s[:32]
@@ -34,6 +31,35 @@ def slugify_company_name(name: str) -> str:
 def make_tenant_db_name(company_name: str) -> str:
     slug = slugify_company_name(company_name)
     return f"tenant_{slug}"
+
+
+def slugify_shop_name(name: str) -> str:
+    """
+    Shop slug (same rules).
+    """
+    s = (name or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = s.strip("-")
+    s = re.sub(r"-{2,}", "-", s)
+    if len(s) < 2:
+        s = (s + "-shop").strip("-")
+    return s[:32]
+
+
+def make_shop_db_name(tenant_slug: str, shop_slug: str) -> str:
+    """
+    Atlas limit: max 38 bytes for db name.
+    Format: shop_<tenant10>_<shop10>_<hash6>
+    """
+    t10 = (tenant_slug or "")[:10]
+    s10 = (shop_slug or "")[:10]
+
+    raw = f"{tenant_slug}:{shop_slug}"
+    h6 = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:6]
+
+    db = f"shop_{t10}_{s10}_{h6}"
+    # Safety clamp (should already be <=38)
+    return db[:38]
 
 
 def init_tenant_database(db_name: str, tenant_doc: dict):
@@ -60,11 +86,9 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
     # ---- Seed roles/permissions ----
     from app.constants.permissions import build_default_roles
 
-    # roles indexes
     tdb.roles.create_index("key", unique=True, name="uniq_roles_key")
     tdb.roles.create_index("name", name="idx_roles_name")
 
-    # seed only if empty
     if tdb.roles.count_documents({}) == 0:
         now = utcnow()
         roles = build_default_roles()
@@ -73,6 +97,32 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
             r["updated_at"] = now
         tdb.roles.insert_many(roles)
 
+
+def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
+    """
+    Creates shop DB and seeds minimal defaults.
+    """
+    client = get_mongo_client()
+    sdb = client[shop_db_name]
+
+    # Important: create at least one collection so DB shows up in Compass
+    sdb.settings.insert_many([
+        {
+            "key": "shop",
+            "shop_name": shop_doc["name"],
+            "shop_slug": shop_doc.get("slug"),
+            "created_at": utcnow(),
+        },
+        {
+            "key": "tenant_ref",
+            "tenant_name": tenant_doc["name"],
+            "tenant_slug": tenant_doc["slug"],
+            "timezone": tenant_doc.get("timezone", "UTC"),
+            "created_at": utcnow(),
+        }
+    ])
+
+    sdb.settings.create_index("key", unique=True, name="uniq_settings_key")
 
 
 @tenant_bp.post("/register")
@@ -107,16 +157,23 @@ def register_tenant():
     if errors:
         return jsonify({"ok": False, "errors": errors}), 400
 
-    # NEW: email must be globally unique
+    # Email must be globally unique
     if master.users.find_one({"email": email}):
         return jsonify({"ok": False, "errors": ["Email already exists. Use another email."]}), 409
 
     tenant_slug = slugify_company_name(company_name)
     tenant_db_name = make_tenant_db_name(company_name)
 
+    # ✅ First shop name = organization name
+    first_shop_name = company_name
+    first_shop_slug = slugify_shop_name(first_shop_name)
+    shop_db_name = make_shop_db_name(tenant_slug, first_shop_slug)
+
     created_at = utcnow()
     tenant_id = None
-    created_db = False
+    shop_id = None
+    created_tenant_db = False
+    created_shop_db = False
 
     try:
         tenant_doc = {
@@ -135,10 +192,14 @@ def register_tenant():
 
         shop_doc = {
             "tenant_id": tenant_id,
-            "name": "Main Shop",
+            "name": first_shop_name,
+            "slug": first_shop_slug,
+            "db_name": shop_db_name,
             "address": company_address,
             "phone": company_phone,
+            "is_primary": True,
             "created_at": created_at,
+            "updated_at": created_at,
         }
         shop_res = master.shops.insert_one(shop_doc)
         shop_id = shop_res.inserted_id
@@ -154,11 +215,17 @@ def register_tenant():
             "is_active": True,
             "shop_id": shop_id,
             "created_at": created_at,
+            "updated_at": created_at,
         }
         master.users.insert_one(user_doc)
 
+        # ✅ Create tenant DB
         init_tenant_database(tenant_db_name, tenant_doc)
-        created_db = True
+        created_tenant_db = True
+
+        # ✅ Create shop DB
+        init_shop_database(shop_db_name, tenant_doc, shop_doc)
+        created_shop_db = True
 
         return jsonify({
             "ok": True,
@@ -166,15 +233,29 @@ def register_tenant():
                 "tenant_id": str(tenant_id),
                 "name": company_name,
                 "slug": tenant_slug,
-                "db_name": tenant_db_name
+                "db_name": tenant_db_name,
+            },
+            "shop": {
+                "shop_id": str(shop_id),
+                "name": first_shop_name,
+                "slug": first_shop_slug,
+                "db_name": shop_db_name,
             }
         }), 201
 
     except DuplicateKeyError:
+        # rollback master docs
         if tenant_id:
             master.users.delete_many({"tenant_id": tenant_id})
             master.shops.delete_many({"tenant_id": tenant_id})
             master.tenants.delete_one({"_id": tenant_id})
+
+        # rollback DBs
+        client = get_mongo_client()
+        if created_shop_db:
+            client.drop_database(shop_db_name)
+        if created_tenant_db:
+            client.drop_database(tenant_db_name)
 
         return jsonify({
             "ok": False,
@@ -187,8 +268,10 @@ def register_tenant():
             master.shops.delete_many({"tenant_id": tenant_id})
             master.tenants.delete_one({"_id": tenant_id})
 
-        if created_db:
-            client = get_mongo_client()
+        client = get_mongo_client()
+        if created_shop_db:
+            client.drop_database(shop_db_name)
+        if created_tenant_db:
             client.drop_database(tenant_db_name)
 
         return jsonify({"ok": False, "errors": [str(e)]}), 500
