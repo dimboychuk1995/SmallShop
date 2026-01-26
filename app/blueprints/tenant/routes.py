@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from datetime import datetime, timezone
 
 from flask import request, jsonify
@@ -9,7 +10,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.extensions import get_master_db, get_mongo_client
 from . import tenant_bp
-import hashlib
+
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -58,7 +59,6 @@ def make_shop_db_name(tenant_slug: str, shop_slug: str) -> str:
     h6 = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:6]
 
     db = f"shop_{t10}_{s10}_{h6}"
-    # Safety clamp (should already be <=38)
     return db[:38]
 
 
@@ -71,7 +71,6 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
     client = get_mongo_client()
     tdb = client[db_name]
 
-    # Seed settings
     tdb.settings.insert_one({
         "key": "tenant",
         "tenant_name": tenant_doc["name"],
@@ -80,10 +79,8 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
         "created_at": utcnow(),
     })
 
-    # Indexes
     tdb.settings.create_index("key", unique=True, name="uniq_settings_key")
 
-    # ---- Seed roles/permissions ----
     from app.constants.permissions import build_default_roles
 
     tdb.roles.create_index("key", unique=True, name="uniq_roles_key")
@@ -105,7 +102,7 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     client = get_mongo_client()
     sdb = client[shop_db_name]
 
-    # Important: create at least one collection so DB shows up in Compass
+    # create at least one collection so DB shows up in Compass
     sdb.settings.insert_many([
         {
             "key": "shop",
@@ -164,14 +161,13 @@ def register_tenant():
     tenant_slug = slugify_company_name(company_name)
     tenant_db_name = make_tenant_db_name(company_name)
 
-    # ✅ First shop name = organization name
+    # First shop name = organization name
     first_shop_name = company_name
     first_shop_slug = slugify_shop_name(first_shop_name)
     shop_db_name = make_shop_db_name(tenant_slug, first_shop_slug)
 
     created_at = utcnow()
     tenant_id = None
-    shop_id = None
     created_tenant_db = False
     created_shop_db = False
 
@@ -197,6 +193,8 @@ def register_tenant():
             "db_name": shop_db_name,
             "address": company_address,
             "phone": company_phone,
+            "status": "active",
+            "is_active": True,
             "is_primary": True,
             "created_at": created_at,
             "updated_at": created_at,
@@ -204,8 +202,10 @@ def register_tenant():
         shop_res = master.shops.insert_one(shop_doc)
         shop_id = shop_res.inserted_id
 
+        # ✅ user has ONLY shop_ids; NO shop_id field
         user_doc = {
             "tenant_id": tenant_id,
+            "shop_ids": [shop_id],
             "first_name": first_name,
             "last_name": last_name,
             "name": f"{first_name} {last_name}".strip(),
@@ -213,17 +213,16 @@ def register_tenant():
             "password_hash": generate_password_hash(password),
             "role": "owner",
             "is_active": True,
-            "shop_id": shop_id,
             "created_at": created_at,
             "updated_at": created_at,
         }
         master.users.insert_one(user_doc)
 
-        # ✅ Create tenant DB
+        # Create tenant DB
         init_tenant_database(tenant_db_name, tenant_doc)
         created_tenant_db = True
 
-        # ✅ Create shop DB
+        # Create shop DB
         init_shop_database(shop_db_name, tenant_doc, shop_doc)
         created_shop_db = True
 
@@ -244,13 +243,11 @@ def register_tenant():
         }), 201
 
     except DuplicateKeyError:
-        # rollback master docs
         if tenant_id:
             master.users.delete_many({"tenant_id": tenant_id})
             master.shops.delete_many({"tenant_id": tenant_id})
             master.tenants.delete_one({"_id": tenant_id})
 
-        # rollback DBs
         client = get_mongo_client()
         if created_shop_db:
             client.drop_database(shop_db_name)

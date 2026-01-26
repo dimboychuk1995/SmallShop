@@ -7,7 +7,7 @@ from flask import render_template, request, redirect, url_for, flash, session
 
 from app.blueprints.settings import settings_bp
 from app.extensions import get_master_db, get_mongo_client
-from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_TENANT_DB
+from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_TENANT_DB, SESSION_SHOP_ID
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 
@@ -26,23 +26,14 @@ def _maybe_object_id(value):
 
 
 def _id_variants(value):
-    """
-    Возвращает варианты значения id для надёжного поиска:
-    - как есть
-    - ObjectId(...) если возможно
-    - str(...)
-    """
     if value is None:
         return []
-    variants = []
-    variants.append(value)
-
+    variants = [value]
     oid = _maybe_object_id(value)
     if oid is not None:
         variants.append(oid)
-
     variants.append(str(value))
-    # уникализируем, сохраняя порядок
+
     out = []
     seen = set()
     for v in variants:
@@ -70,9 +61,6 @@ def _load_current_user(master):
 
 
 def _load_header_context():
-    """
-    Даёт app_user_display/app_tenant_display для layouts/app_base.html
-    """
     master = get_master_db()
 
     user_id = _maybe_object_id(session.get(SESSION_USER_ID))
@@ -127,41 +115,29 @@ def users_index():
     if request.method == "POST":
         return _handle_create_user(master, current_user, tenant_id_raw)
 
-    # ✅ Истина — tenant_id из master.users текущего пользователя
     tenant_from_user = current_user.get("tenant_id")
-    shop_from_user = current_user.get("shop_id")
 
     tenant_values = []
     for v in _id_variants(tenant_from_user) + _id_variants(tenant_id_raw):
         tenant_values.append(v)
-    # unique
     tenant_values = [v for v in dict.fromkeys([x for x in tenant_values if x is not None])]
 
-    shop_values = _id_variants(shop_from_user)
-
-    # 1) основной поиск по tenant_id
+    # ✅ Only by tenant_id (no shop_id fallback)
     users = list(
         master.users.find({"tenant_id": {"$in": tenant_values}}).sort("created_at", -1)
     )
-
-    # 2) fallback (если вдруг у тебя часть пользователей “привязана” к shop_id)
-    if not users and shop_values:
-        users = list(
-            master.users.find({"shop_id": {"$in": shop_values}}).sort("created_at", -1)
-        )
 
     debug_users = {
         "handler": "settings.users_index",
         "template": "public/settings/users.html",
         "master_db_name": getattr(master, "name", ""),
-        "mongo_address": str(getattr(getattr(master, "client", None), "address", "")),
         "session_user_id": str(session.get(SESSION_USER_ID) or ""),
         "session_tenant_id": str(session.get(SESSION_TENANT_ID) or ""),
+        "session_shop_id": str(session.get(SESSION_SHOP_ID) or ""),
         "current_user_id": str(current_user.get("_id") or ""),
         "current_user_tenant_id": str(tenant_from_user or ""),
-        "current_user_shop_id": str(shop_from_user or ""),
+        "current_user_shop_ids": [str(x) for x in (current_user.get("shop_ids") or [])] if isinstance(current_user.get("shop_ids"), list) else [],
         "tenant_values": [str(x) for x in tenant_values],
-        "shop_values": [str(x) for x in shop_values],
         "total_users_in_master": master.users.count_documents({}),
         "found_users": len(users),
     }
@@ -192,7 +168,6 @@ def _handle_create_user(master, current_user, tenant_id_raw):
         flash("Passwords do not match.", "error")
         return redirect(url_for("settings.users_index"))
 
-    # Email uniqueness (global, because login uses email only)
     if master.users.find_one({"email": email}):
         flash("User with this email already exists.", "error")
         return redirect(url_for("settings.users_index"))
@@ -211,15 +186,21 @@ def _handle_create_user(master, current_user, tenant_id_raw):
 
     from werkzeug.security import generate_password_hash
 
-    # ✅ tenant_id берём из current_user (чтобы не было рассинхрона)
     tenant_id = _maybe_object_id(current_user.get("tenant_id")) or _maybe_object_id(tenant_id_raw)
     creator_id = _maybe_object_id(session.get(SESSION_USER_ID))
 
-    shop_id = current_user.get("shop_id")
+    # ✅ New user gets access to the current ACTIVE shop only (session shop_id),
+    # fallback to creator primary (creator.shop_ids[0]) if session missing.
+    active_shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
+    creator_shop_ids = current_user.get("shop_ids") if isinstance(current_user.get("shop_ids"), list) else []
+    if active_shop_oid is None and creator_shop_ids:
+        active_shop_oid = creator_shop_ids[0]
+
+    shop_ids = [active_shop_oid] if active_shop_oid is not None else []
 
     user_doc = {
         "tenant_id": tenant_id,
-        "shop_id": shop_id,
+        "shop_ids": shop_ids,
         "email": email,
         "password_hash": generate_password_hash(password),
         "first_name": first_name,
@@ -235,9 +216,6 @@ def _handle_create_user(master, current_user, tenant_id_raw):
         "updated_at": utcnow(),
         "created_by": creator_id,
     }
-
-    if user_doc["shop_id"] is None:
-        user_doc.pop("shop_id", None)
 
     master.users.insert_one(user_doc)
 

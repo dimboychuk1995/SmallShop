@@ -9,7 +9,7 @@ from flask import render_template, request, redirect, url_for, flash, session, j
 
 from app.blueprints.settings import settings_bp
 from app.extensions import get_master_db, get_mongo_client
-from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_TENANT_DB
+from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 
@@ -134,12 +134,10 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
 def _shop_id_list(user_doc: dict) -> list[str]:
     """
     Возвращает список shop_ids как строки.
-    Поддерживает и старую схему user.shop_id.
+    shop_id больше НЕ используется.
     """
     if isinstance(user_doc.get("shop_ids"), list) and user_doc["shop_ids"]:
         return [str(x) for x in user_doc["shop_ids"]]
-    if user_doc.get("shop_id"):
-        return [str(user_doc["shop_id"])]
     return []
 
 
@@ -175,7 +173,6 @@ def locations_index():
 
         tenant_id = tenant["_id"]
         tenant_slug = tenant.get("slug") or slugify_shop_name(tenant.get("name") or "tenant")
-
         shop_slug = slugify_shop_name(name)
 
         # unique slug inside tenant
@@ -203,23 +200,19 @@ def locations_index():
             res = master.shops.insert_one(shop_doc)
             new_shop_id = res.inserted_id
 
-            # ✅ дать доступ текущему пользователю (простая модель shop_ids[])
-            if isinstance(user.get("shop_ids"), list):
-                # add if not exists
-                if str(new_shop_id) not in [str(x) for x in user["shop_ids"]]:
+            # ✅ дать доступ текущему пользователю (shop_ids[])
+            shop_ids = user.get("shop_ids")
+            if isinstance(shop_ids, list):
+                if str(new_shop_id) not in [str(x) for x in shop_ids]:
                     master.users.update_one(
                         {"_id": user["_id"]},
                         {"$push": {"shop_ids": new_shop_id}}
                     )
             else:
-                # migrate from single shop_id -> shop_ids
-                arr = []
-                if user.get("shop_id"):
-                    arr.append(user["shop_id"])
-                arr.append(new_shop_id)
+                # если shop_ids ещё нет — просто создаём массив
                 master.users.update_one(
                     {"_id": user["_id"]},
-                    {"$set": {"shop_ids": arr}}
+                    {"$set": {"shop_ids": [new_shop_id]}}
                 )
 
             # ✅ создать shop DB
@@ -341,16 +334,13 @@ def api_locations_create():
         res = master.shops.insert_one(shop_doc)
         new_shop_id = res.inserted_id
 
-        # grant access to current user
-        if isinstance(user.get("shop_ids"), list):
-            if str(new_shop_id) not in [str(x) for x in user["shop_ids"]]:
+        # ✅ grant access to current user (shop_ids only)
+        shop_ids = user.get("shop_ids")
+        if isinstance(shop_ids, list):
+            if str(new_shop_id) not in [str(x) for x in shop_ids]:
                 master.users.update_one({"_id": user["_id"]}, {"$push": {"shop_ids": new_shop_id}})
         else:
-            arr = []
-            if user.get("shop_id"):
-                arr.append(user["shop_id"])
-            arr.append(new_shop_id)
-            master.users.update_one({"_id": user["_id"]}, {"$set": {"shop_ids": arr}})
+            master.users.update_one({"_id": user["_id"]}, {"$set": {"shop_ids": [new_shop_id]}})
 
         init_shop_database(shop_db_name, tenant, shop_doc)
 
