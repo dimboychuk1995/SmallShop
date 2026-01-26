@@ -334,14 +334,41 @@ def api_locations_create():
         res = master.shops.insert_one(shop_doc)
         new_shop_id = res.inserted_id
 
-        # ✅ grant access to current user (shop_ids only)
-        shop_ids = user.get("shop_ids")
-        if isinstance(shop_ids, list):
-            if str(new_shop_id) not in [str(x) for x in shop_ids]:
-                master.users.update_one({"_id": user["_id"]}, {"$push": {"shop_ids": new_shop_id}})
-        else:
-            master.users.update_one({"_id": user["_id"]}, {"$set": {"shop_ids": [new_shop_id]}})
+        # ✅ grant access ONLY to owners in this tenant
+        # Ensure shop_ids exists and add new_shop_id if missing.
+        master.users.update_many(
+            {
+                "tenant_id": tenant["_id"],
+                "role": "owner",
+                "is_active": True,
+                "$or": [
+                    {"shop_ids": {"$exists": False}},
+                    {"shop_ids": {"$ne": new_shop_id}},
+                ],
+            },
+            [
+                {
+                    "$set": {
+                        "shop_ids": {
+                            "$cond": [
+                                {"$isArray": "$shop_ids"},
+                                {
+                                    "$cond": [
+                                        {"$in": [new_shop_id, "$shop_ids"]},
+                                        "$shop_ids",
+                                        {"$concatArrays": ["$shop_ids", [new_shop_id]]},
+                                    ]
+                                },
+                                [new_shop_id],
+                            ]
+                        },
+                        "updated_at": utcnow(),
+                    }
+                }
+            ]
+        )
 
+        # ✅ create shop DB
         init_shop_database(shop_db_name, tenant, shop_doc)
 
         return jsonify({
