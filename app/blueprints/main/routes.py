@@ -143,11 +143,6 @@ def settings_notifications():
     return _render_app_page("public/settings/notifications.html", active_page="settings")
 
 
-@main_bp.get("/settings/integrations")
-@login_required
-@permission_required("settings.manage_org")
-def settings_integrations():
-    return _render_app_page("public/settings/integrations.html", active_page="settings")
 
 
 @main_bp.get("/reports")

@@ -1,0 +1,183 @@
+{% extends "layouts/app_base.html" %}
+{% block page_title %}Settings — Shops{% endblock %}
+
+{% block app_content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h1 class="h4 mb-1">Shops</h1>
+    <p class="text-muted mb-0">Manage your shops / branches. Switch active shop and update shop info.</p>
+  </div>
+
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.settings') }}">Back to Settings</a>
+    <button class="btn btn-primary btn-sm" type="button" disabled>
+      + Add shop
+    </button>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- Left: list -->
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header d-flex flex-column flex-md-row gap-2 justify-content-between align-items-md-center">
+        <div class="fw-semibold">Shop list</div>
+
+        <div class="d-flex gap-2 align-items-center">
+          <div class="input-group input-group-sm" style="max-width: 320px;">
+            <span class="input-group-text">Search</span>
+            <input class="form-control" type="text" placeholder="Name, city, phone..." disabled>
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Refresh</button>
+        </div>
+      </div>
+
+      <div class="card-body p-0">
+        {% if shops and shops|length > 0 %}
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th style="width: 34%;">Shop</th>
+                <th style="width: 26%;">Contact</th>
+                <th style="width: 22%;">Address</th>
+                <th style="width: 10%;">Status</th>
+                <th class="text-end" style="width: 8%;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in shops %}
+              <tr>
+                <td>
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-light border"
+                         style="width: 34px; height: 34px;">
+                      <span class="text-muted small">🏬</span>
+                    </div>
+
+                    <div>
+                      <div class="fw-semibold">
+                        {{ s.name or "—" }}
+                        {% if s.is_primary %}
+                          <span class="badge text-bg-secondary ms-1">Primary</span>
+                        {% endif %}
+                        {% if s.is_active %}
+                          <span class="badge text-bg-success ms-1">Active</span>
+                        {% else %}
+                          <span class="badge text-bg-light text-muted border ms-1">Disabled</span>
+                        {% endif %}
+                      </div>
+                      <div class="text-muted small">
+                        {% if s.slug %}<span class="me-2">Slug: <span class="font-monospace">{{ s.slug }}</span></span>{% endif %}
+                        {% if s.db_name %}<span>DB: <span class="font-monospace">{{ s.db_name }}</span></span>{% endif %}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+
+                <td>
+                  <div class="small">
+                    <div><span class="text-muted">Phone:</span> {{ s.phone or "—" }}</div>
+                    <div><span class="text-muted">Email:</span> {{ s.email or "—" }}</div>
+                  </div>
+                </td>
+
+                <td>
+                  <div class="small">
+                    <div>{{ s.address_line or s.address or "—" }}</div>
+                    <div class="text-muted">
+                      {% if s.city %}{{ s.city }}{% endif %}
+                      {% if s.state %}{% if s.city %}, {% endif %}{{ s.state }}{% endif %}
+                      {% if s.zip %} {{ s.zip }}{% endif %}
+                    </div>
+                  </div>
+                </td>
+
+                <td>
+                  {% if s.status %}
+                    <span class="badge text-bg-info">{{ s.status }}</span>
+                  {% else %}
+                    <span class="badge text-bg-light text-muted border">—</span>
+                  {% endif %}
+                </td>
+
+                <td class="text-end">
+                  <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-primary" type="button" disabled>Open</button>
+                    <button class="btn btn-outline-secondary" type="button" disabled>Edit</button>
+                    <button class="btn btn-outline-danger" type="button" disabled>Disable</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-4">
+          <div class="text-muted mb-2">No shops yet.</div>
+          <div class="small text-muted">
+            Your first shop is usually created when the organization is created. Later you’ll be able to add more.
+          </div>
+          <div class="mt-3">
+            <button class="btn btn-primary btn-sm" type="button" disabled>+ Add first shop</button>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Future: members/permissions -->
+    <div class="card mt-3">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <div class="fw-semibold">Shop access</div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Manage access</button>
+      </div>
+      <div class="card-body">
+        <div class="text-muted small">
+          Here we’ll show who has access to which shop (based on user.shop_ids) and allow granting / removing access.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: active shop / quick actions -->
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <div class="fw-semibold">Active shop</div>
+      </div>
+      <div class="card-body">
+        <div class="text-muted small mb-2">This is the shop you’re currently working in.</div>
+
+        <div class="mb-3">
+          <label class="form-label">Select active shop</label>
+          <select class="form-select form-select-sm" disabled>
+            <option selected>Loading… (API later)</option>
+          </select>
+          <div class="form-text">Later this will update your session (active shop).</div>
+        </div>
+
+        <div class="d-grid gap-2">
+          <button class="btn btn-outline-primary btn-sm" type="button" disabled>Switch</button>
+          <button class="btn btn-outline-secondary btn-sm" type="button" disabled>View shop profile</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-header">
+        <div class="fw-semibold">Notes</div>
+      </div>
+      <div class="card-body">
+        <ul class="small text-muted mb-0">
+          <li>Work orders and parts will be stored per shop (shop DB).</li>
+          <li>Primary shop is the first shop in the user’s <span class="font-monospace">shop_ids</span>.</li>
+          <li>Active shop will be stored in session (switch anytime).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
