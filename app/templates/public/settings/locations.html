@@ -10,9 +10,71 @@
 
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.settings') }}">Back to Settings</a>
-    <button class="btn btn-primary btn-sm" type="button" disabled>
+
+    <!-- ✅ Add shop toggle -->
+    <button class="btn btn-primary btn-sm" type="button"
+            data-bs-toggle="collapse" data-bs-target="#addShopCollapse"
+            aria-expanded="false" aria-controls="addShopCollapse">
       + Add shop
     </button>
+  </div>
+</div>
+
+<!-- ✅ Add shop form -->
+<div class="collapse mb-3" id="addShopCollapse">
+  <div class="card border-primary-subtle">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <div class="fw-semibold">Add new shop</div>
+      <button class="btn btn-outline-secondary btn-sm" type="button"
+              data-bs-toggle="collapse" data-bs-target="#addShopCollapse">
+        Close
+      </button>
+    </div>
+
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('settings.locations_index') }}" class="row g-3">
+        <div class="col-12 col-md-5">
+          <label class="form-label">Shop name <span class="text-danger">*</span></label>
+          <input type="text" name="name" class="form-control" placeholder="e.g. LTS Repair Group — Chicago" required minlength="2">
+          <div class="form-text">This must be unique inside your organization.</div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Phone</label>
+          <input type="text" name="phone" class="form-control" placeholder="+1 (xxx) xxx-xxxx">
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label">Status</label>
+          <input type="text" class="form-control" value="Active" disabled>
+          <div class="form-text">New shops are created as active.</div>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Address</label>
+          <input type="text" name="address" class="form-control" placeholder="Street, City, State ZIP">
+        </div>
+
+        <div class="col-12 d-flex gap-2">
+          <button type="submit" class="btn btn-primary">
+            Create shop
+          </button>
+          <button type="button" class="btn btn-outline-secondary"
+                  data-bs-toggle="collapse" data-bs-target="#addShopCollapse">
+            Cancel
+          </button>
+        </div>
+
+        <div class="col-12">
+          <div class="alert alert-light border mb-0">
+            <div class="small text-muted">
+              After creation: we automatically grant you access (adds to your <span class="font-monospace">shop_ids</span>)
+              and create a separate MongoDB database for this shop.
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -120,7 +182,10 @@
             Your first shop is usually created when the organization is created. Later you’ll be able to add more.
           </div>
           <div class="mt-3">
-            <button class="btn btn-primary btn-sm" type="button" disabled>+ Add first shop</button>
+            <button class="btn btn-primary btn-sm" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#addShopCollapse">
+              + Add first shop
+            </button>
           </div>
         </div>
         {% endif %}

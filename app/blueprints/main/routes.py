@@ -143,8 +143,6 @@ def settings_notifications():
     return _render_app_page("public/settings/notifications.html", active_page="settings")
 
 
-
-
 @main_bp.get("/reports")
 @login_required
 def reports():
