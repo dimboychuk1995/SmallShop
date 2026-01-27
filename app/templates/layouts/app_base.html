@@ -21,10 +21,26 @@
           <div class="fw-semibold">{{ app_tenant_display or "—" }}</div>
         </div>
 
-        <!-- ✅ Active shop -->
+        <!-- ✅ Active shop switcher -->
         <div class="text-end">
           <div class="small text-muted">Active shop</div>
-          <div class="fw-semibold">{{ app_shop_display or "—" }}</div>
+
+          {% if shop_options and shop_options|length > 0 %}
+            <form method="POST" action="{{ url_for('main.set_active_shop') }}">
+              <select class="form-select form-select-sm"
+                      name="shop_id"
+                      onchange="this.form.submit()"
+                      style="min-width: 220px;">
+                {% for s in shop_options %}
+                  <option value="{{ s.id }}" {% if active_shop_id == s.id %}selected{% endif %}>
+                    {{ s.name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </form>
+          {% else %}
+            <div class="fw-semibold">—</div>
+          {% endif %}
         </div>
 
         <a class="btn btn-outline-danger btn-sm" href="{{ url_for('auth.logout') }}">Logout</a>

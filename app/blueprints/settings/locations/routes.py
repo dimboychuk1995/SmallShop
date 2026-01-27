@@ -14,6 +14,7 @@ from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 from app.utils.layout import build_app_layout_context
 
+
 # -----------------------------
 # Helpers
 # -----------------------------
@@ -28,7 +29,7 @@ def _maybe_object_id(value):
     try:
         return ObjectId(str(value))
     except Exception:
-        return str(value)
+        return None
 
 
 def _load_current_user(master):
@@ -45,39 +46,12 @@ def _load_current_tenant(master):
     return master.tenants.find_one({"_id": tenant_id, "status": "active"})
 
 
-def _load_header_context():
+def _render_settings_page(template_name: str, **ctx):
     """
-    Даёт app_user_display/app_tenant_display для layouts/app_base.html
+    Один общий рендер для settings-страниц через единый layout builder.
     """
-    master = get_master_db()
+    layout = build_app_layout_context(filter_nav_items(NAV_ITEMS), "settings")
 
-    user = _load_current_user(master)
-    tenant = _load_current_tenant(master)
-
-    if not user or not tenant:
-        flash("Session expired. Please login again.", "error")
-        session.clear()
-        return None
-
-    user_name = user.get("name") or user.get("username") or ""
-    user_email = user.get("email") or ""
-    tenant_name = tenant.get("name") or tenant.get("title") or tenant.get("company_name") or ""
-
-    return {
-        "app_user_display": user_name or user_email or "—",
-        "app_tenant_display": tenant_name or "—",
-        "nav_items": filter_nav_items(NAV_ITEMS),
-        "active_page": "settings",
-        # иногда удобно в темплейт тоже
-        "_current_user": user,
-        "_current_tenant": tenant,
-    }
-
-
-def _render_app_page(template_name: str, active_page: str, **ctx):
-    layout = build_app_layout_context(NAV_ITEMS, active_page)
-
-    # если сессия битая — user/tenant будут None
     if not layout.get("_current_user") or not layout.get("_current_tenant"):
         flash("Session data mismatch. Please login again.", "error")
         session.clear()
@@ -85,6 +59,7 @@ def _render_app_page(template_name: str, active_page: str, **ctx):
 
     layout.update(ctx)
     return render_template(template_name, **layout)
+
 
 def slugify_shop_name(name: str) -> str:
     s = (name or "").strip().lower()
@@ -98,7 +73,7 @@ def slugify_shop_name(name: str) -> str:
 
 def make_shop_db_name(tenant_slug: str, shop_slug: str) -> str:
     """
-    Atlas limit (у тебя): max 38 bytes for db name.
+    Atlas limit: max 38 bytes for db name.
     Format: shop_<tenant10>_<shop10>_<hash6>
     """
     t10 = (tenant_slug or "")[:10]
@@ -115,7 +90,6 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     client = get_mongo_client()
     sdb = client[shop_db_name]
 
-    # если уже есть settings — не трогаем (чтобы не дублировать)
     if sdb.settings.count_documents({"key": "shop"}) == 0:
         sdb.settings.insert_many([
             {
@@ -135,14 +109,42 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     sdb.settings.create_index("key", unique=True, name="uniq_settings_key")
 
 
-def _shop_id_list(user_doc: dict) -> list[str]:
+def _grant_shop_to_owners(master, tenant_id, new_shop_id):
     """
-    Возвращает список shop_ids как строки.
-    shop_id больше НЕ используется.
+    Добавляем новый shop только всем пользователям role=owner (в этом tenant).
+    shop_id поля больше нет — только shop_ids[].
     """
-    if isinstance(user_doc.get("shop_ids"), list) and user_doc["shop_ids"]:
-        return [str(x) for x in user_doc["shop_ids"]]
-    return []
+    master.users.update_many(
+        {
+            "tenant_id": tenant_id,
+            "role": "owner",
+            "is_active": True,
+            "$or": [
+                {"shop_ids": {"$exists": False}},
+                {"shop_ids": {"$ne": new_shop_id}},
+            ],
+        },
+        [
+            {
+                "$set": {
+                    "shop_ids": {
+                        "$cond": [
+                            {"$isArray": "$shop_ids"},
+                            {
+                                "$cond": [
+                                    {"$in": [new_shop_id, "$shop_ids"]},
+                                    "$shop_ids",
+                                    {"$concatArrays": ["$shop_ids", [new_shop_id]]},
+                                ]
+                            },
+                            [new_shop_id],
+                        ]
+                    },
+                    "updated_at": utcnow(),
+                }
+            }
+        ]
+    )
 
 
 # -----------------------------
@@ -154,7 +156,6 @@ def _shop_id_list(user_doc: dict) -> list[str]:
 @permission_required("settings.manage_org")
 def locations_index():
     master = get_master_db()
-
     user = _load_current_user(master)
     tenant = _load_current_tenant(master)
 
@@ -175,19 +176,17 @@ def locations_index():
             flash("Shop name is required.", "error")
             return redirect(url_for("settings.locations_index"))
 
-        tenant_id = tenant["_id"]
         tenant_slug = tenant.get("slug") or slugify_shop_name(tenant.get("name") or "tenant")
         shop_slug = slugify_shop_name(name)
 
-        # unique slug inside tenant
-        if master.shops.find_one({"tenant_id": tenant_id, "slug": shop_slug}):
+        if master.shops.find_one({"tenant_id": tenant["_id"], "slug": shop_slug}):
             flash("Shop with this name already exists.", "error")
             return redirect(url_for("settings.locations_index"))
 
         shop_db_name = make_shop_db_name(tenant_slug, shop_slug)
 
         shop_doc = {
-            "tenant_id": tenant_id,
+            "tenant_id": tenant["_id"],
             "name": name,
             "slug": shop_slug,
             "db_name": shop_db_name,
@@ -204,20 +203,8 @@ def locations_index():
             res = master.shops.insert_one(shop_doc)
             new_shop_id = res.inserted_id
 
-            # ✅ дать доступ текущему пользователю (shop_ids[])
-            shop_ids = user.get("shop_ids")
-            if isinstance(shop_ids, list):
-                if str(new_shop_id) not in [str(x) for x in shop_ids]:
-                    master.users.update_one(
-                        {"_id": user["_id"]},
-                        {"$push": {"shop_ids": new_shop_id}}
-                    )
-            else:
-                # если shop_ids ещё нет — просто создаём массив
-                master.users.update_one(
-                    {"_id": user["_id"]},
-                    {"$set": {"shop_ids": [new_shop_id]}}
-                )
+            # ✅ доступ выдаём только owners
+            _grant_shop_to_owners(master, tenant["_id"], new_shop_id)
 
             # ✅ создать shop DB
             init_shop_database(shop_db_name, tenant, shop_doc)
@@ -232,8 +219,8 @@ def locations_index():
     # -----------------------------
     # List (GET)
     # -----------------------------
-    allowed_shop_ids = _shop_id_list(user)
-    primary_shop_id = allowed_shop_ids[0] if allowed_shop_ids else None
+    allowed_shop_ids = session.get("shop_ids") if isinstance(session.get("shop_ids"), list) else []
+    allowed_shop_ids = [str(x) for x in allowed_shop_ids]
 
     shops = []
     for s in master.shops.find({"tenant_id": tenant["_id"]}).sort("created_at", 1):
@@ -252,12 +239,11 @@ def locations_index():
             "zip": s.get("zip"),
             "status": s.get("status") or ("active" if s.get("is_active", True) else "disabled"),
             "is_active": bool(s.get("is_active", True)),
-            "is_primary": (primary_shop_id is not None and sid == primary_shop_id) or bool(s.get("is_primary", False)),
-            "has_access": (sid in allowed_shop_ids) if allowed_shop_ids else False,
+            "is_primary": False,  # primary = shop_ids[0], можно дорисовать позже
+            "has_access": (sid in allowed_shop_ids),
         })
 
-    return _render_app_page("public/settings/locations.html", active_page="settings", shops=shops)
-
+    return _render_settings_page("public/settings/locations.html", shops=shops)
 
 
 # -----------------------------
@@ -269,8 +255,9 @@ def locations_index():
 @permission_required("settings.manage_org")
 def api_locations_list():
     master = get_master_db()
-    user = _load_current_user(master)
     tenant = _load_current_tenant(master)
+    user = _load_current_user(master)
+
     if not user or not tenant:
         return jsonify({"ok": False, "errors": ["Session mismatch"]}), 401
 
@@ -334,41 +321,9 @@ def api_locations_create():
         res = master.shops.insert_one(shop_doc)
         new_shop_id = res.inserted_id
 
-        # ✅ grant access ONLY to owners in this tenant
-        # Ensure shop_ids exists and add new_shop_id if missing.
-        master.users.update_many(
-            {
-                "tenant_id": tenant["_id"],
-                "role": "owner",
-                "is_active": True,
-                "$or": [
-                    {"shop_ids": {"$exists": False}},
-                    {"shop_ids": {"$ne": new_shop_id}},
-                ],
-            },
-            [
-                {
-                    "$set": {
-                        "shop_ids": {
-                            "$cond": [
-                                {"$isArray": "$shop_ids"},
-                                {
-                                    "$cond": [
-                                        {"$in": [new_shop_id, "$shop_ids"]},
-                                        "$shop_ids",
-                                        {"$concatArrays": ["$shop_ids", [new_shop_id]]},
-                                    ]
-                                },
-                                [new_shop_id],
-                            ]
-                        },
-                        "updated_at": utcnow(),
-                    }
-                }
-            ]
-        )
+        # ✅ доступ выдаём только owners
+        _grant_shop_to_owners(master, tenant["_id"], new_shop_id)
 
-        # ✅ create shop DB
         init_shop_database(shop_db_name, tenant, shop_doc)
 
         return jsonify({
