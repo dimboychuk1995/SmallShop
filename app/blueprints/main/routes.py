@@ -65,15 +65,29 @@ def _render_app_page(template_name: str, active_page: str):
     user_email = user.get("email") or ""
     tenant_name = tenant.get("name") or tenant.get("title") or tenant.get("company_name") or ""
 
-    # ВАЖНО: отдаём и старые переменные (для app_base.html), и новые (для страниц)
     app_user_display = user_name or user_email or "—"
     app_tenant_display = tenant_name or "—"
+
+    # ✅ Active shop display
+    app_shop_display = "—"
+    try:
+        master = get_master_db()
+        shop_id_raw = session.get("shop_id")  # active shop in session
+        if shop_id_raw:
+            shop_id = ObjectId(str(shop_id_raw))
+            shop = master.shops.find_one({"_id": shop_id, "tenant_id": tenant["_id"]})
+            if shop:
+                app_shop_display = shop.get("name") or "—"
+    except Exception:
+        # если shop_id не ObjectId или что-то не так — просто покажем —
+        app_shop_display = "—"
 
     return render_template(
         template_name,
         # header (то, что ждёт app_base.html)
         app_user_display=app_user_display,
         app_tenant_display=app_tenant_display,
+        app_shop_display=app_shop_display,
 
         # на всякий случай оставим и эти (если где-то используются в страницах)
         user_name=user_name,

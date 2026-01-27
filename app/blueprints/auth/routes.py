@@ -33,20 +33,21 @@ def login():
         flash("Tenant not found or inactive.", "error")
         return redirect(url_for("main.index"))
 
-    # ✅ only shop_ids (no shop_id field in DB anymore)
+    # ✅ only shop_ids from DB
     shop_ids = user.get("shop_ids") if isinstance(user.get("shop_ids"), list) else []
     shop_ids_str = [str(x) for x in shop_ids]
-    active_shop = shop_ids_str[0] if shop_ids_str else None
 
+    # ✅ do NOT pass shop_id -> login_user will set session["shop_id"] = shop_ids_str[0]
     login_user(
         user_id=user["_id"],
         tenant_id=tenant["_id"],
         tenant_db_name=tenant.get("db_name", ""),
         shop_ids=shop_ids_str,
-        shop_id=active_shop,
+        shop_id=None,
     )
 
     return redirect(url_for("main.dashboard"))
+
 
 
 @auth_bp.get("/logout")

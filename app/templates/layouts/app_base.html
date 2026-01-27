@@ -21,6 +21,12 @@
           <div class="fw-semibold">{{ app_tenant_display or "—" }}</div>
         </div>
 
+        <!-- ✅ Active shop -->
+        <div class="text-end">
+          <div class="small text-muted">Active shop</div>
+          <div class="fw-semibold">{{ app_shop_display or "—" }}</div>
+        </div>
+
         <a class="btn btn-outline-danger btn-sm" href="{{ url_for('auth.logout') }}">Logout</a>
       </div>
     </div>
