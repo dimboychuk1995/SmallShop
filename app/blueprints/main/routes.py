@@ -50,7 +50,7 @@ def _load_user_and_tenant_from_session():
     return user, tenant
 
 
-def _render_app_page(template_name: str, active_page: str):
+def _render_app_page(template_name: str, active_page: str, **ctx):
     """
     Общий рендер для всех внутренних страниц.
     """
@@ -68,28 +68,26 @@ def _render_app_page(template_name: str, active_page: str):
     app_user_display = user_name or user_email or "—"
     app_tenant_display = tenant_name or "—"
 
-    # ✅ Active shop display
+    # ✅ Active shop display (from session["shop_id"])
     app_shop_display = "—"
-    try:
-        master = get_master_db()
-        shop_id_raw = session.get("shop_id")  # active shop in session
-        if shop_id_raw:
-            shop_id = ObjectId(str(shop_id_raw))
-            shop = master.shops.find_one({"_id": shop_id, "tenant_id": tenant["_id"]})
+    master = get_master_db()
+    shop_id_raw = session.get("shop_id")
+    if shop_id_raw:
+        try:
+            shop_oid = ObjectId(str(shop_id_raw))
+            shop = master.shops.find_one({"_id": shop_oid, "tenant_id": tenant["_id"]})
             if shop:
                 app_shop_display = shop.get("name") or "—"
-    except Exception:
-        # если shop_id не ObjectId или что-то не так — просто покажем —
-        app_shop_display = "—"
+        except Exception:
+            pass
 
-    return render_template(
-        template_name,
-        # header (то, что ждёт app_base.html)
+    payload = dict(
+        # header
         app_user_display=app_user_display,
         app_tenant_display=app_tenant_display,
         app_shop_display=app_shop_display,
 
-        # на всякий случай оставим и эти (если где-то используются в страницах)
+        # optional legacy fields
         user_name=user_name,
         user_email=user_email,
         tenant_name=tenant_name,
@@ -99,6 +97,10 @@ def _render_app_page(template_name: str, active_page: str):
         active_page=active_page,
     )
 
+    # ✅ allow passing page-specific context like users=..., shops=...
+    payload.update(ctx)
+
+    return render_template(template_name, **payload)
 
 # ===== Pages =====
 

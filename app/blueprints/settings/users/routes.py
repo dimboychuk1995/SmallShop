@@ -10,7 +10,7 @@ from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_TENANT_DB, SESSION_SHOP_ID
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
-
+from app.utils.layout import build_app_layout_context
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -87,11 +87,15 @@ def _load_header_context():
 
 
 def _render_settings(template_name: str, **ctx):
-    base = _load_header_context()
-    if base is None:
+    layout = build_app_layout_context(filter_nav_items(NAV_ITEMS), "settings")
+
+    if not layout.get("_current_user") or not layout.get("_current_tenant"):
+        flash("Session expired. Please login again.", "error")
+        session.clear()
         return redirect(url_for("main.index"))
-    base.update(ctx)
-    return render_template(template_name, **base)
+
+    layout.update(ctx)
+    return render_template(template_name, **layout)
 
 
 @settings_bp.route("/users", methods=["GET", "POST"])

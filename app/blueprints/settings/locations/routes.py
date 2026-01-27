@@ -12,7 +12,7 @@ from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
-
+from app.utils.layout import build_app_layout_context
 
 # -----------------------------
 # Helpers
@@ -74,13 +74,17 @@ def _load_header_context():
     }
 
 
-def _render_settings(template_name: str, **ctx):
-    base = _load_header_context()
-    if base is None:
-        return redirect(url_for("main.index"))
-    base.update(ctx)
-    return render_template(template_name, **base)
+def _render_app_page(template_name: str, active_page: str, **ctx):
+    layout = build_app_layout_context(NAV_ITEMS, active_page)
 
+    # если сессия битая — user/tenant будут None
+    if not layout.get("_current_user") or not layout.get("_current_tenant"):
+        flash("Session data mismatch. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    layout.update(ctx)
+    return render_template(template_name, **layout)
 
 def slugify_shop_name(name: str) -> str:
     s = (name or "").strip().lower()
@@ -252,12 +256,8 @@ def locations_index():
             "has_access": (sid in allowed_shop_ids) if allowed_shop_ids else False,
         })
 
-    return _render_settings(
-        "public/settings/locations.html",
-        shops=shops,
-        allowed_shop_ids=allowed_shop_ids,
-        primary_shop_id=primary_shop_id,
-    )
+    return _render_app_page("public/settings/locations.html", active_page="settings", shops=shops)
+
 
 
 # -----------------------------
