@@ -18,20 +18,12 @@
   </div>
 </div>
 
-<!-- DEBUG (only when empty) -->
-{% if (not users) and debug_users %}
-  <div class="alert alert-warning border mb-3">
-    <div class="fw-semibold mb-2">Debug: users list is empty</div>
-    <pre class="small mb-0">{{ debug_users | tojson(indent=2) }}</pre>
-  </div>
-{% endif %}
-
 <!-- Quick info -->
 <div class="alert alert-light border mb-3">
   <div class="d-flex flex-column flex-md-row gap-2 justify-content-between">
     <div>
       <div class="fw-semibold">Tip</div>
-      <div class="text-muted small">Later we’ll add: invite emails, reset password, deactivate, and per-user overrides.</div>
+      <div class="text-muted small">Now you can choose which shops the user can access.</div>
     </div>
     <div class="text-muted small">
       Required permission: <span class="badge text-bg-secondary">settings.manage_users</span>
@@ -44,7 +36,6 @@
   <div class="card-header d-flex flex-column flex-md-row gap-2 justify-content-between align-items-md-center">
     <div class="fw-semibold">Users</div>
 
-    <!-- Simple search UI (frontend only for now) -->
     <div class="d-flex gap-2">
       <input class="form-control form-control-sm" type="text" placeholder="Search (later)" disabled>
       <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Search</button>
@@ -170,6 +161,43 @@
                   Active user
                 </label>
               </div>
+            </div>
+
+            <hr class="my-2">
+
+            <!-- ✅ Shop access чекбоксы -->
+            <div class="col-12">
+              <label class="form-label mb-1">Shop access</label>
+              <div class="text-muted small mb-2">
+                Select shops this user can work with. The first selected shop will be treated as primary later.
+              </div>
+
+              {% if shops_for_form and shops_for_form|length > 0 %}
+                <div class="row g-2">
+                  {% for s in shops_for_form %}
+                    <div class="col-12 col-md-6">
+                      <div class="form-check border rounded p-2">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               name="shop_ids"
+                               id="shop_{{ s.id }}"
+                               value="{{ s.id }}"
+                               {% if active_shop_id and active_shop_id == s.id %}checked{% endif %}>
+                        <label class="form-check-label" for="shop_{{ s.id }}">
+                          {{ s.name }}
+                        </label>
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+                <div class="form-text mt-2">
+                  Tip: we pre-selected your current active shop.
+                </div>
+              {% else %}
+                <div class="alert alert-warning border mb-0">
+                  No shops found. Create a shop first in Settings → Shops.
+                </div>
+              {% endif %}
             </div>
 
             <hr class="my-2">

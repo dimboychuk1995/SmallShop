@@ -95,6 +95,29 @@ def _render_settings_page(template_name: str, **ctx):
     return render_template(template_name, **layout)
 
 
+def _safe_str_list(v):
+    if not isinstance(v, list):
+        return []
+    return [str(x) for x in v if x is not None]
+
+
+def _load_shops_for_tenant(master, tenant_id):
+    """
+    Отдаём список шап (для чекбоксов) в формате:
+      [{id, name}, ...]
+    """
+    shops = []
+    if not tenant_id:
+        return shops
+
+    for s in master.shops.find({"tenant_id": tenant_id}).sort("created_at", 1):
+        shops.append({
+            "id": str(s["_id"]),
+            "name": s.get("name") or "—",
+        })
+    return shops
+
+
 # -----------------------------
 # UI Routes
 # -----------------------------
@@ -117,21 +140,31 @@ def users_index():
         session.clear()
         return redirect(url_for("main.index"))
 
-    if request.method == "POST":
-        return _handle_create_user(master, current_user, tenant_id_raw)
-
-    # Истина: tenant_id из current_user (fallback на сессию)
+    # tenant id (нормализуем)
     tenant_from_user = current_user.get("tenant_id") or tenant_id_raw
+    tenant_oid = _maybe_object_id(tenant_from_user) or _maybe_object_id(tenant_id_raw)
+
+    if request.method == "POST":
+        return _handle_create_user(master, current_user, tenant_oid, tenant_id_raw)
+
     tenant_values = _id_variants(tenant_from_user)
 
     users = list(
         master.users.find({"tenant_id": {"$in": tenant_values}}).sort("created_at", -1)
     )
 
-    return _render_settings_page("public/settings/users.html", users=users)
+    # ✅ шапы для чекбоксов (только текущий tenant)
+    shops_for_form = _load_shops_for_tenant(master, tenant_oid)
+
+    return _render_settings_page(
+        "public/settings/users.html",
+        users=users,
+        shops_for_form=shops_for_form,
+        active_shop_id=str(session.get(SESSION_SHOP_ID) or "")  # чтобы в UI pre-check
+    )
 
 
-def _handle_create_user(master, current_user, tenant_id_raw):
+def _handle_create_user(master, current_user, tenant_oid, tenant_id_raw):
     first_name = (request.form.get("first_name") or "").strip()
     last_name = (request.form.get("last_name") or "").strip()
     email = (request.form.get("email") or "").strip().lower()
@@ -172,23 +205,39 @@ def _handle_create_user(master, current_user, tenant_id_raw):
 
     from werkzeug.security import generate_password_hash
 
-    tenant_id = _maybe_object_id(current_user.get("tenant_id")) or _maybe_object_id(tenant_id_raw)
+    tenant_id = tenant_oid or _maybe_object_id(current_user.get("tenant_id")) or _maybe_object_id(tenant_id_raw)
     creator_id = _maybe_object_id(session.get(SESSION_USER_ID))
 
-    # ✅ Новый юзер получает доступ только к АКТИВНОЙ шапе (session shop_id),
-    # fallback на primary шапу создателя (creator.shop_ids[0]).
-    active_shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
+    # ✅ Чекбоксы шап:
+    # name="shop_ids" -> request.form.getlist("shop_ids")
+    selected_shop_ids_raw = request.form.getlist("shop_ids")
 
-    creator_shop_ids = current_user.get("shop_ids") if isinstance(current_user.get("shop_ids"), list) else []
-    if active_shop_oid is None and creator_shop_ids:
-        # creator_shop_ids может содержать ObjectId — это ок
-        active_shop_oid = creator_shop_ids[0]
+    # Разрешаем выдавать доступ ТОЛЬКО к тем шапам, которые доступны создателю (из сессии)
+    allowed_shop_ids = set(_safe_str_list(session.get("shop_ids")))
 
-    shop_ids = [active_shop_oid] if active_shop_oid is not None else []
+    selected_shop_oids = []
+    for sid in selected_shop_ids_raw:
+        sid_str = str(sid).strip()
+        if not sid_str:
+            continue
+        if allowed_shop_ids and sid_str not in allowed_shop_ids:
+            # попытка выдать доступ к “чужой” шапе — игнорим
+            continue
+        oid = _maybe_object_id(sid_str)
+        if oid and oid not in selected_shop_oids:
+            selected_shop_oids.append(oid)
+
+    # Если ничего не выбрали — fallback на активную шапу
+    if not selected_shop_oids:
+        active_shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
+        creator_shop_ids = current_user.get("shop_ids") if isinstance(current_user.get("shop_ids"), list) else []
+        if active_shop_oid is None and creator_shop_ids:
+            active_shop_oid = creator_shop_ids[0]
+        selected_shop_oids = [active_shop_oid] if active_shop_oid is not None else []
 
     user_doc = {
         "tenant_id": tenant_id,
-        "shop_ids": shop_ids,  # ✅ только shop_ids
+        "shop_ids": selected_shop_oids,  # ✅ только shop_ids
         "email": email,
         "password_hash": generate_password_hash(password),
         "first_name": first_name,
