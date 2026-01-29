@@ -55,10 +55,12 @@ def create_app():
     from app.blueprints.auth import auth_bp
     from app.blueprints.tenant import tenant_bp
     from app.blueprints.settings import settings_bp
+    from app.blueprints.vendors import vendors_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(tenant_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(vendors_bp)
 
     return app

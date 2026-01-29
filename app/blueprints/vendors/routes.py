@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from bson import ObjectId
+from flask import request, redirect, url_for, flash, session
+
+from app.blueprints.vendors import vendors_bp
+from app.blueprints.main.routes import _render_app_page
+from app.extensions import get_master_db, get_mongo_client
+from app.utils.auth import (
+    login_required,
+    SESSION_TENANT_ID,
+    SESSION_USER_ID,
+)
+from app.utils.permissions import permission_required
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def _oid(value):
+    if not value:
+        return None
+    try:
+        return ObjectId(str(value))
+    except Exception:
+        return None
+
+
+def _tenant_id_variants():
+    raw = session.get(SESSION_TENANT_ID)
+    out = set()
+    if raw is None:
+        return []
+    out.add(raw)
+    out.add(str(raw))
+    oid = _oid(raw)
+    if oid:
+        out.add(oid)
+    return list(out)
+
+
+def _get_active_shop(master):
+    shop_id_raw = session.get("shop_id")
+    shop_oid = _oid(shop_id_raw)
+    if not shop_oid:
+        return None
+
+    tenant_variants = _tenant_id_variants()
+    if not tenant_variants:
+        return None
+
+    return master.shops.find_one({"_id": shop_oid, "tenant_id": {"$in": tenant_variants}})
+
+
+def _get_shop_db(master):
+    shop = _get_active_shop(master)
+    if not shop:
+        return None, None
+
+    db_name = (
+        shop.get("db_name")
+        or shop.get("database")
+        or shop.get("db")
+        or shop.get("mongo_db")
+        or shop.get("shop_db")
+    )
+    if not db_name:
+        return None, shop
+
+    client = get_mongo_client()
+    return client[str(db_name)], shop
+
+
+def _vendors_collection():
+    master = get_master_db()
+    db, shop = _get_shop_db(master)
+    if db is None:
+        return None, None, None
+    return db.vendors, shop, master
+
+
+@vendors_bp.get("/vendors")
+@login_required
+@permission_required("vendors.view")
+def vendors_page():
+    coll, shop, master = _vendors_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("main.dashboard"))
+
+    vendors = list(coll.find({}).sort([("is_active", -1), ("name", 1), ("created_at", -1)]))
+
+    return _render_app_page(
+        "public/vendors.html",
+        active_page="vendors",
+        vendors=vendors,
+    )
+
+
+@vendors_bp.post("/vendors/create")
+@login_required
+@permission_required("vendors.edit")
+def vendors_create():
+    coll, shop, master = _vendors_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    tenant_oid = _oid(session.get(SESSION_TENANT_ID))
+    if not tenant_oid:
+        flash("Tenant session missing. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    address = (request.form.get("address") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    website = (request.form.get("website") or "").strip()
+    pc_first = (request.form.get("primary_contact_first_name") or "").strip()
+    pc_last = (request.form.get("primary_contact_last_name") or "").strip()
+
+    if not name:
+        flash("Vendor name is required.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    doc = {
+        "name": name,
+        "phone": phone or None,
+        "email": email or None,
+        "website": website or None,
+        "address": address or None,
+
+        "primary_contact_first_name": pc_first or None,
+        "primary_contact_last_name": pc_last or None,
+
+        "notes": notes or None,
+
+        "is_active": True,
+
+        # audit
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user_oid,
+        "updated_by": user_oid,
+
+        "deactivated_at": None,
+        "deactivated_by": None,
+
+        # refs
+        "shop_id": shop["_id"],     # ObjectId
+        "tenant_id": tenant_oid,    # ObjectId
+    }
+
+    coll.insert_one(doc)
+
+    flash("Vendor created successfully.", "success")
+    return redirect(url_for("vendors.vendors_page"))
+
+
+@vendors_bp.post("/vendors/<vendor_id>/edit")
+@login_required
+@permission_required("vendors.edit")
+def vendors_edit(vendor_id):
+    coll, shop, master = _vendors_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    vid = _oid(vendor_id)
+    if not vid:
+        flash("Invalid vendor id.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    existing = coll.find_one({"_id": vid})
+    if not existing:
+        flash("Vendor not found.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    address = (request.form.get("address") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    website = (request.form.get("website") or "").strip()
+    pc_first = (request.form.get("primary_contact_first_name") or "").strip()
+    pc_last = (request.form.get("primary_contact_last_name") or "").strip()
+
+    if not name:
+        flash("Vendor name is required.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    coll.update_one(
+        {"_id": vid},
+        {"$set": {
+            "name": name,
+            "phone": phone or None,
+            "email": email or None,
+            "website": website or None,
+            "address": address or None,
+            "primary_contact_first_name": pc_first or None,
+            "primary_contact_last_name": pc_last or None,
+            "notes": notes or None,
+            "updated_at": now,
+            "updated_by": user_oid,
+        }},
+    )
+
+    flash("Vendor updated successfully.", "success")
+    return redirect(url_for("vendors.vendors_page"))
+
+
+@vendors_bp.post("/vendors/<vendor_id>/deactivate")
+@login_required
+@permission_required("vendors.deactivate")
+def vendors_deactivate(vendor_id):
+    coll, shop, master = _vendors_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    vid = _oid(vendor_id)
+    if not vid:
+        flash("Invalid vendor id.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    existing = coll.find_one({"_id": vid})
+    if not existing:
+        flash("Vendor not found.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    if existing.get("is_active") is False:
+        flash("Vendor is already deactivated.", "info")
+        return redirect(url_for("vendors.vendors_page"))
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    coll.update_one(
+        {"_id": vid},
+        {"$set": {
+            "is_active": False,
+            "updated_at": now,
+            "updated_by": user_oid,
+            "deactivated_at": now,
+            "deactivated_by": user_oid,
+        }},
+    )
+
+    flash("Vendor deactivated.", "success")
+    return redirect(url_for("vendors.vendors_page"))

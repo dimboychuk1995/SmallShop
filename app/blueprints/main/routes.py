@@ -1,9 +1,9 @@
-from flask import render_template, request, redirect, url_for, session, flash
+from flask import render_template, request, redirect, url_for, session, flash, g
 from bson import ObjectId
 
-from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID
+from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_TENANT_DB
 from app.utils.permissions import permission_required
-from app.extensions import get_master_db
+from app.extensions import get_master_db, get_mongo_client
 from . import main_bp
 
 
@@ -16,6 +16,10 @@ def index():
 NAV_ITEMS = [
     {"key": "dashboard", "label": "Dashboard", "endpoint": "main.dashboard"},
     {"key": "parts", "label": "Parts", "endpoint": "main.parts"},
+
+    # ✅ Vendors (после Parts)
+    {"key": "vendors", "label": "Vendors", "endpoint": "main.vendors"},
+
     {"key": "work_orders", "label": "Work Orders", "endpoint": "main.work_orders"},
     {"key": "settings", "label": "Settings", "endpoint": "main.settings"},
     {"key": "reports", "label": "Reports", "endpoint": "main.reports"},
@@ -50,9 +54,64 @@ def _load_user_and_tenant_from_session():
     return user, tenant
 
 
+def _get_tenant_db():
+    db_name = session.get(SESSION_TENANT_DB)
+    if not db_name:
+        return None
+    client = get_mongo_client()
+    return client[db_name]
+
+
+def _compute_effective_permissions(user: dict):
+    """
+    1) tenant DB roles (по key)
+    2) master.users allow_permissions / deny_permissions (как у тебя в users create)
+    """
+    tdb = _get_tenant_db()
+    if tdb is None:
+        return set()
+
+    # роли: поддержим и "role" (строка) и "roles" (список)
+    role_keys = []
+    if isinstance(user.get("roles"), list) and user["roles"]:
+        role_keys = [str(x).strip() for x in user["roles"] if str(x).strip()]
+    else:
+        role_keys = [str(user.get("role") or "viewer").strip()]
+
+    perms = set()
+
+    for rk in role_keys:
+        role_doc = tdb.roles.find_one({"key": rk})
+        if role_doc and isinstance(role_doc.get("permissions"), list):
+            for p in role_doc["permissions"]:
+                s = str(p).strip()
+                if s:
+                    perms.add(s)
+
+    # overrides в master.users (у тебя поля именно allow_permissions / deny_permissions)
+    allow = user.get("allow_permissions")
+    deny = user.get("deny_permissions")
+
+    if isinstance(allow, list):
+        for p in allow:
+            s = str(p).strip()
+            if s:
+                perms.add(s)
+
+    if isinstance(deny, list):
+        for p in deny:
+            s = str(p).strip()
+            if s and s in perms:
+                perms.remove(s)
+
+    return perms
+
+
 def _render_app_page(template_name: str, active_page: str, **ctx):
     """
     Общий рендер для всех внутренних страниц.
+    + Считает effective permissions из tenant DB roles + user allow/deny
+    + Прокидывает permissions в payload и в g.user_permissions
     """
     user, tenant = _load_user_and_tenant_from_session()
 
@@ -104,6 +163,12 @@ def _render_app_page(template_name: str, active_page: str, **ctx):
                 app_shop_display = opt["name"]
                 break
 
+    # ✅ EFFECTIVE PERMISSIONS
+    perms_set = _compute_effective_permissions(user)
+    g.user_permissions = perms_set
+
+    user_permissions_list = sorted(perms_set)
+
     payload = dict(
         app_user_display=app_user_display,
         app_tenant_display=app_tenant_display,
@@ -115,6 +180,10 @@ def _render_app_page(template_name: str, active_page: str, **ctx):
 
         nav_items=NAV_ITEMS,
         active_page=active_page,
+
+        # ✅ permissions
+        user_permissions=user_permissions_list,         # list[str]
+        user_permissions_list=user_permissions_list,    # alias для твоего debug
     )
 
     payload.update(ctx)
@@ -124,12 +193,6 @@ def _render_app_page(template_name: str, active_page: str, **ctx):
 @main_bp.post("/session/active-shop")
 @login_required
 def set_active_shop():
-    """
-    Меняем активную шапу и сохраняем в session["shop_id"].
-    Проверяем:
-      - shop принадлежит текущему tenant
-      - shop входит в shop_ids пользователя
-    """
     master = get_master_db()
     user, tenant = _load_user_and_tenant_from_session()
 
@@ -143,7 +206,6 @@ def set_active_shop():
         flash("Shop is required.", "error")
         return redirect(request.referrer or url_for("main.dashboard"))
 
-    # shop_ids у нас в сессии (мы кладём их при логине)
     allowed = session.get("shop_ids") or []
     allowed = [str(x) for x in allowed]
 
@@ -167,6 +229,7 @@ def set_active_shop():
 
     return redirect(request.referrer or url_for("main.dashboard"))
 
+
 # ===== Pages =====
 
 @main_bp.get("/dashboard")
@@ -183,6 +246,13 @@ def parts():
     return _render_app_page("public/parts.html", active_page="parts")
 
 
+@main_bp.get("/vendors")
+@login_required
+@permission_required("vendors.view")
+def vendors():
+    return _render_app_page("public/vendors.html", active_page="vendors")
+
+
 @main_bp.get("/work-orders")
 @login_required
 @permission_required("work_orders.view")
@@ -195,6 +265,7 @@ def work_orders():
 @permission_required("settings.view")
 def settings():
     return _render_app_page("public/settings.html", active_page="settings")
+
 
 @main_bp.get("/settings/organization")
 @login_required
