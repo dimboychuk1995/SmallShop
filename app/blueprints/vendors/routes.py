@@ -138,87 +138,26 @@ def vendors_create():
         "email": email or None,
         "website": website or None,
         "address": address or None,
-
         "primary_contact_first_name": pc_first or None,
         "primary_contact_last_name": pc_last or None,
-
         "notes": notes or None,
 
         "is_active": True,
 
-        # audit
         "created_at": now,
         "updated_at": now,
         "created_by": user_oid,
         "updated_by": user_oid,
-
         "deactivated_at": None,
         "deactivated_by": None,
 
-        # refs
-        "shop_id": shop["_id"],     # ObjectId
-        "tenant_id": tenant_oid,    # ObjectId
+        "shop_id": shop["_id"],
+        "tenant_id": tenant_oid,
     }
 
     coll.insert_one(doc)
 
     flash("Vendor created successfully.", "success")
-    return redirect(url_for("vendors.vendors_page"))
-
-
-@vendors_bp.post("/vendors/<vendor_id>/edit")
-@login_required
-@permission_required("vendors.edit")
-def vendors_edit(vendor_id):
-    coll, shop, master = _vendors_collection()
-    if coll is None or shop is None:
-        flash("Shop database not configured for this shop.", "error")
-        return redirect(url_for("vendors.vendors_page"))
-
-    vid = _oid(vendor_id)
-    if not vid:
-        flash("Invalid vendor id.", "error")
-        return redirect(url_for("vendors.vendors_page"))
-
-    existing = coll.find_one({"_id": vid})
-    if not existing:
-        flash("Vendor not found.", "error")
-        return redirect(url_for("vendors.vendors_page"))
-
-    name = (request.form.get("name") or "").strip()
-    phone = (request.form.get("phone") or "").strip()
-    email = (request.form.get("email") or "").strip().lower()
-    address = (request.form.get("address") or "").strip()
-    notes = (request.form.get("notes") or "").strip()
-
-    website = (request.form.get("website") or "").strip()
-    pc_first = (request.form.get("primary_contact_first_name") or "").strip()
-    pc_last = (request.form.get("primary_contact_last_name") or "").strip()
-
-    if not name:
-        flash("Vendor name is required.", "error")
-        return redirect(url_for("vendors.vendors_page"))
-
-    now = utcnow()
-    user_oid = _oid(session.get(SESSION_USER_ID))
-
-    coll.update_one(
-        {"_id": vid},
-        {"$set": {
-            "name": name,
-            "phone": phone or None,
-            "email": email or None,
-            "website": website or None,
-            "address": address or None,
-            "primary_contact_first_name": pc_first or None,
-            "primary_contact_last_name": pc_last or None,
-            "notes": notes or None,
-            "updated_at": now,
-            "updated_by": user_oid,
-        }},
-    )
-
-    flash("Vendor updated successfully.", "success")
     return redirect(url_for("vendors.vendors_page"))
 
 
@@ -260,4 +199,49 @@ def vendors_deactivate(vendor_id):
     )
 
     flash("Vendor deactivated.", "success")
+    return redirect(url_for("vendors.vendors_page"))
+
+
+@vendors_bp.post("/vendors/<vendor_id>/restore")
+@login_required
+@permission_required("vendors.deactivate")
+def vendors_restore(vendor_id):
+    """
+    Restore (reactivate) vendor в SHOP DB.
+    Используем то же право vendors.deactivate (можем переименовать позже).
+    """
+    coll, shop, master = _vendors_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    vid = _oid(vendor_id)
+    if not vid:
+        flash("Invalid vendor id.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    existing = coll.find_one({"_id": vid})
+    if not existing:
+        flash("Vendor not found.", "error")
+        return redirect(url_for("vendors.vendors_page"))
+
+    if existing.get("is_active") is True:
+        flash("Vendor is already active.", "info")
+        return redirect(url_for("vendors.vendors_page"))
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    coll.update_one(
+        {"_id": vid},
+        {"$set": {
+            "is_active": True,
+            "updated_at": now,
+            "updated_by": user_oid,
+            "deactivated_at": None,
+            "deactivated_by": None,
+        }},
+    )
+
+    flash("Vendor restored.", "success")
     return redirect(url_for("vendors.vendors_page"))
