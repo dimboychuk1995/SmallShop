@@ -1,5 +1,3 @@
-# app/constants/permissions.py
-
 from __future__ import annotations
 
 
@@ -24,7 +22,12 @@ PERMISSIONS: dict[str, str] = {
     "work_orders.change_status": "Change work order status",
     "work_orders.delete": "Delete work orders",
 
-    # Reports (ты упомянул)
+    # Vendors
+    "vendors.view": "Vendor: view",
+    "vendors.edit": "Vendor: edit",
+    "vendors.deactivate": "Vendor: deactivate",
+
+    # Reports
     "reports.view": "View reports",
     "reports.export": "Export reports",
 
@@ -80,6 +83,7 @@ def build_default_roles() -> list[dict]:
     # - work_orders: view
     # - dashboard: view
     # - reports: view
+    # - vendors: view (чтобы мог смотреть/выбирать поставщиков)
     parts_manager = _safe_subset({
         "dashboard.view",
         "reports.view",
@@ -88,6 +92,7 @@ def build_default_roles() -> list[dict]:
         "parts.edit",
         "parts.delete",
         "work_orders.view",
+        "vendors.view",
     })
 
     # Senior mechanic:
@@ -111,12 +116,14 @@ def build_default_roles() -> list[dict]:
     })
 
     # Viewer (добавил как полезный минимум)
+    # + vendors.view (офис/аудит часто надо хотя бы видеть список вендоров)
     viewer = _safe_subset({
         "dashboard.view",
         "parts.view",
         "work_orders.view",
         "reports.view",
         "settings.view",
+        "vendors.view",
     })
 
     return [
