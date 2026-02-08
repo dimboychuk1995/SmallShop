@@ -15,11 +15,11 @@ def index():
 # Единый список меню (добавлять новые страницы — 1 строка тут)
 NAV_ITEMS = [
     {"key": "dashboard", "label": "Dashboard", "endpoint": "main.dashboard"},
-    {"key": "parts", "label": "Parts", "endpoint": "main.parts"},
 
-    # ✅ Vendors (после Parts) -> ведём на vendors blueprint, который реально грузит список
+    # было: "main.parts"
+    {"key": "parts", "label": "Parts", "endpoint": "parts.parts_page"},
+
     {"key": "vendors", "label": "Vendors", "endpoint": "vendors.vendors_page"},
-
     {"key": "work_orders", "label": "Work Orders", "endpoint": "main.work_orders"},
     {"key": "settings", "label": "Settings", "endpoint": "main.settings"},
     {"key": "reports", "label": "Reports", "endpoint": "main.reports"},
@@ -211,12 +211,6 @@ def set_active_shop():
 def dashboard():
     return _render_app_page("public/dashboard.html", active_page="dashboard")
 
-
-@main_bp.get("/parts")
-@permission_required("parts.view")
-@login_required
-def parts():
-    return _render_app_page("public/parts.html", active_page="parts")
 
 
 @main_bp.get("/work-orders")
