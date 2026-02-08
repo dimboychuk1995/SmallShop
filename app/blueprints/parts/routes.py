@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from bson import ObjectId
-from flask import request, redirect, url_for, flash, session
+from flask import request, redirect, url_for, flash, session, jsonify
 
 from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
@@ -82,21 +82,22 @@ def _parts_collections():
       - vendors
       - parts_categories
       - parts_locations
+      - parts_orders
     """
     master = get_master_db()
     db, shop = _get_shop_db(master)
     if db is None:
-        return None, None, None, None, shop, master
+        return None, None, None, None, None, shop, master
 
     return (
         db.parts,
         db.vendors,
         db.parts_categories,
         db.parts_locations,
+        db.parts_orders,
         shop,
         master,
     )
-
 
 def _parse_int(value: str, default: int = 0) -> int:
     try:
@@ -160,8 +161,10 @@ def parts_page():
 
     Также сразу тянем справочники для селектов в модалке:
       vendors / categories / locations (active only)
+
+    + last_order_id из session (чтобы показать кнопку Received)
     """
-    parts_coll, vendors_coll, cats_coll, locs_coll, shop, master = _parts_collections()
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
     if parts_coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("main.dashboard"))
@@ -212,6 +215,8 @@ def parts_page():
         if lid:
             p["location_name"] = location_map.get(lid) or ""
 
+    last_order_id = session.get("last_parts_order_id")
+
     return _render_app_page(
         "public/parts.html",
         active_page="parts",
@@ -219,7 +224,10 @@ def parts_page():
         vendors=vendors,
         categories=categories,
         locations=locations,
+        last_order_id=last_order_id,
     )
+
+
 
 @parts_bp.post("/create")
 @login_required
@@ -236,7 +244,7 @@ def parts_create():
       in_stock (int)
       average_cost (float)
     """
-    parts_coll, vendors_coll, cats_coll, locs_coll, shop, master = _parts_collections()
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
     if parts_coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("parts.parts_page"))
@@ -334,6 +342,257 @@ def parts_create():
     return redirect(url_for("parts.parts_page"))
 
 
+@parts_bp.get("/api/search")
+@login_required
+def parts_api_search():
+    """
+    Search parts for dropdown/autocomplete.
+    Query params:
+      q: search string
+      limit: optional (default 20, max 50)
+
+    Returns: { ok: true, items: [{id, part_number, description, average_cost, vendor_id}] }
+    """
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if parts_coll is None or shop is None:
+        return {"ok": False, "error": "Shop database not configured."}, 400
+
+    q = (request.args.get("q") or "").strip()
+    limit = _parse_int(request.args.get("limit") or "20", default=20)
+    if limit <= 0:
+        limit = 20
+    if limit > 50:
+        limit = 50
+
+    # Если пустой запрос — не грузим базу
+    if not q:
+        return {"ok": True, "items": []}
+
+    # Простой поиск: part_number startswith / contains, description contains
+    # (потом можно улучшить индексами/atlas)
+    regex = {"$regex": q, "$options": "i"}
+    cursor = parts_coll.find(
+        {
+            "is_active": True,
+            "$or": [
+                {"part_number": regex},
+                {"description": regex},
+                {"reference": regex},
+            ],
+        },
+        {
+            "part_number": 1,
+            "description": 1,
+            "average_cost": 1,
+            "vendor_id": 1,
+        },
+    ).sort([("part_number", 1)]).limit(limit)
+
+    items = []
+    for p in cursor:
+        items.append({
+            "id": str(p["_id"]),
+            "part_number": p.get("part_number") or "",
+            "description": p.get("description") or "",
+            "average_cost": float(p.get("average_cost") or 0.0),
+            "vendor_id": str(p["vendor_id"]) if p.get("vendor_id") else "",
+        })
+
+    return {"ok": True, "items": items}
+
+
+@parts_bp.post("/api/orders/create")
+@login_required
+@permission_required("parts.edit")
+def parts_api_orders_create():
+    """
+    AJAX create order.
+    Accepts JSON:
+      {
+        "vendor_id": "<oid str>",
+        "items": [
+          {"part_id":"<oid str>", "quantity": 2, "price": 12.34},
+          ...
+        ]
+      }
+
+    Returns JSON:
+      { "ok": true, "order_id": "<oid str>", "items_count": N }
+    """
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if parts_coll is None or vendors_coll is None or orders_coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop database not configured for this shop."}), 400
+
+    tenant_oid = _oid(session.get(SESSION_TENANT_ID))
+    if not tenant_oid:
+        session.clear()
+        return jsonify({"ok": False, "error": "Tenant session missing. Please login again."}), 401
+
+    data = request.get_json(silent=True) or {}
+
+    vendor_id_raw = (data.get("vendor_id") or "").strip()
+    if not vendor_id_raw:
+        return jsonify({"ok": False, "error": "Vendor is required."}), 400
+
+    vendor_oid, err = _validate_ref(vendors_coll, vendor_id_raw, "Vendor")
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+
+    items_in = data.get("items") or []
+    if not isinstance(items_in, list) or len(items_in) == 0:
+        return jsonify({"ok": False, "error": "Add at least one item."}), 400
+
+    items = []
+    for it in items_in:
+        pid = _oid((it.get("part_id") or "").strip())
+        if not pid:
+            continue
+
+        qty = _parse_int(it.get("quantity"), default=0)
+        price = _parse_float(it.get("price"), default=-1.0)
+
+        if qty <= 0:
+            continue
+        if price < 0:
+            return jsonify({"ok": False, "error": "Price cannot be negative."}), 400
+
+        part = parts_coll.find_one({"_id": pid, "is_active": True})
+        if not part:
+            continue
+
+        items.append({
+            "part_id": pid,
+            "part_number": part.get("part_number"),
+            "description": part.get("description"),
+            "price": float(price),
+            "quantity": int(qty),
+        })
+
+    if not items:
+        return jsonify({"ok": False, "error": "No valid items in order."}), 400
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    order_doc = {
+        "vendor_id": vendor_oid,
+        "items": items,
+        "status": "ordered",
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user_oid,
+        "updated_by": user_oid,
+        "shop_id": shop["_id"],
+        "tenant_id": tenant_oid,
+    }
+
+    res = orders_coll.insert_one(order_doc)
+
+    return jsonify({"ok": True, "order_id": str(res.inserted_id), "items_count": len(items)})
+
+def _recalc_weighted_avg(old_qty: int, old_avg: float, add_qty: int, add_price: float) -> float:
+    """
+    Weighted average:
+      (old_avg * old_qty + add_price * add_qty) / (old_qty + add_qty)
+
+    Safeguards for 0 qty.
+    """
+    old_qty = int(old_qty or 0)
+    add_qty = int(add_qty or 0)
+    old_avg = float(old_avg or 0.0)
+    add_price = float(add_price or 0.0)
+
+    denom = old_qty + add_qty
+    if denom <= 0:
+        return 0.0
+
+    return (old_avg * old_qty + add_price * add_qty) / denom
+
+
+@parts_bp.post("/api/orders/<order_id>/receive")
+@login_required
+@permission_required("parts.edit")
+def parts_api_orders_receive(order_id: str):
+    """
+    AJAX receive order (full receive).
+    Returns JSON { ok: true, updated_parts: N }
+    """
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if parts_coll is None or orders_coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop database not configured for this shop."}), 400
+
+    oid = _oid(order_id)
+    if not oid:
+        return jsonify({"ok": False, "error": "Invalid order id."}), 400
+
+    order = orders_coll.find_one({"_id": oid})
+    if not order:
+        return jsonify({"ok": False, "error": "Order not found."}), 404
+
+    if order.get("is_active") is False:
+        return jsonify({"ok": False, "error": "Order is inactive."}), 400
+
+    if order.get("status") == "received":
+        return jsonify({"ok": True, "updated_parts": 0, "message": "Order already received."})
+
+    items = order.get("items") or []
+    if not isinstance(items, list) or len(items) == 0:
+        return jsonify({"ok": False, "error": "Order has no items."}), 400
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    updated = 0
+    for it in items:
+        pid = it.get("part_id")
+        if not pid:
+            continue
+
+        recv_qty = int(it.get("quantity") or 0)
+        recv_price = float(it.get("price") or 0.0)
+
+        if recv_qty <= 0:
+            continue
+        if recv_price < 0:
+            return jsonify({"ok": False, "error": "Order contains negative price."}), 400
+
+        part = parts_coll.find_one({"_id": pid})
+        if not part or part.get("is_active") is False:
+            continue
+
+        old_qty = int(part.get("in_stock") or 0)
+        old_avg = float(part.get("average_cost") or 0.0)
+
+        new_avg = _recalc_weighted_avg(old_qty, old_avg, recv_qty, recv_price)
+        new_qty = old_qty + recv_qty
+
+        parts_coll.update_one(
+            {"_id": pid},
+            {"$set": {
+                "in_stock": int(new_qty),
+                "average_cost": float(new_avg),
+                "updated_at": now,
+                "updated_by": user_oid,
+            }},
+        )
+
+        updated += 1
+
+    orders_coll.update_one(
+        {"_id": oid},
+        {"$set": {
+            "status": "received",
+            "received_at": now,
+            "received_by": user_oid,
+            "updated_at": now,
+            "updated_by": user_oid,
+        }},
+    )
+
+    return jsonify({"ok": True, "updated_parts": updated})
+
+
 @parts_bp.post("/<part_id>/deactivate")
 @login_required
 @permission_required("parts.deactivate")
@@ -341,7 +600,7 @@ def parts_deactivate(part_id: str):
     """
     Удаление запчасти = деактивация (soft delete).
     """
-    parts_coll, vendors_coll, cats_coll, locs_coll, shop, master = _parts_collections()
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
     if parts_coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("parts.parts_page"))
@@ -386,7 +645,7 @@ def parts_restore(part_id: str):
     Restore (reactivate) part.
     Используем то же право parts.deactivate.
     """
-    parts_coll, vendors_coll, cats_coll, locs_coll, shop, master = _parts_collections()
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
     if parts_coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("parts.parts_page"))
