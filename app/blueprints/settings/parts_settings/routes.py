@@ -27,7 +27,7 @@ from app.utils.layout import build_app_layout_context
 
 
 # -----------------------------
-# Helpers (как в users.py)
+# Helpers
 # -----------------------------
 
 def utcnow():
@@ -44,6 +44,8 @@ def _maybe_object_id(value):
 
 
 def _get_tenant_db():
+    # оставляем (может быть полезно в другом месте),
+    # но parts_settings больше НЕ использует tenant DB как fallback
     db_name = session.get(SESSION_TENANT_DB)
     if not db_name:
         return None
@@ -86,48 +88,57 @@ def _load_shops_for_tenant(master, tenant_id):
     return shops
 
 
-def _get_shop_db(master):
+def _get_shop_db_strict(master):
     """
-    Shop-specific DB (shop DB).
-    Пытаемся взять имя базы из master.shops, иначе fallback на tenant DB.
-
-    Ожидаемые поля у shop (варианты): db_name / database / mongo_db / shop_db.
-    Если у тебя другое поле — просто добавь его сюда.
+    STRICT: return ONLY active shop DB.
+    No tenant DB fallback (otherwise categories become shared across shops).
     """
     client = get_mongo_client()
 
     shop_id = _maybe_object_id(session.get(SESSION_SHOP_ID))
-    if shop_id:
-        shop = master.shops.find_one({"_id": shop_id})
-        if shop:
-            db_name = (
-                shop.get("db_name")
-                or shop.get("database")
-                or shop.get("mongo_db")
-                or shop.get("shop_db")
-            )
-            if db_name:
-                return client[str(db_name)]
+    if not shop_id:
+        return None
 
-    # fallback
-    tdb = _get_tenant_db()
-    if tdb is not None:
-        return tdb
+    shop = master.shops.find_one({"_id": shop_id})
+    if not shop:
+        return None
 
-    return None
+    db_name = (
+        shop.get("db_name")
+        or shop.get("database")
+        or shop.get("mongo_db")
+        or shop.get("shop_db")
+    )
+    if not db_name:
+        return None
+
+    return client[str(db_name)]
 
 
 def _clean_name(value: str) -> str:
     return (value or "").strip()
 
 
+def _require_active_shop_or_redirect():
+    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
+    if not shop_oid:
+        flash("Please select an active shop first.", "error")
+        return None
+    return shop_oid
+
+
 def _require_shop_db_or_redirect():
     master = get_master_db()
-    sdb = _get_shop_db(master)
+    shop_oid = _require_active_shop_or_redirect()
+    if not shop_oid:
+        return None, None, None
+
+    sdb = _get_shop_db_strict(master)
     if sdb is None:
-        flash("Shop database is not configured. Please select a shop and try again.", "error")
-        return None, None
-    return master, sdb
+        flash("Shop database is not configured for the active shop.", "error")
+        return None, None, None
+
+    return master, sdb, shop_oid
 
 
 def _find_one_by_id(col, _id_str: str, extra_filter: dict | None = None):
@@ -148,14 +159,6 @@ def _find_one_by_id(col, _id_str: str, extra_filter: dict | None = None):
 @login_required
 @permission_required("parts.edit")
 def parts_settings_index():
-    """
-    Рендер страницы Parts Settings.
-    Шаблон: public/settings/parts_settings.html
-
-    На странице:
-      - Parts Locations CRUD
-      - Parts Categories CRUD
-    """
     master = get_master_db()
 
     tenant_id_raw = session.get(SESSION_TENANT_ID)
@@ -176,9 +179,10 @@ def parts_settings_index():
     active_shop_id = str(session.get(SESSION_SHOP_ID) or "")
     shops_for_ui = _load_shops_for_tenant(master, tenant_oid)
 
-    sdb = _get_shop_db(master)
-    if sdb is None:
-        # можно отрендерить пусто, но лучше сказать что нет shop db
+    shop_oid = _maybe_object_id(active_shop_id)
+    sdb = _get_shop_db_strict(master)
+
+    if not shop_oid or sdb is None:
         return _render_settings_page(
             "public/settings/parts_settings.html",
             active_shop_id=active_shop_id,
@@ -191,22 +195,17 @@ def parts_settings_index():
             parts_categories=[],
             edit_location_id=None,
             edit_category_id=None,
-            error_message="Shop database is not configured for the active shop.",
+            error_message="Please select an active shop (and ensure it has a shop DB).",
         )
 
-    # данные
-    shop_oid = _maybe_object_id(active_shop_id)
-    loc_filter = {"shop_id": shop_oid} if shop_oid else {}
-    cat_filter = {"shop_id": shop_oid} if shop_oid else {}
-
+    # ✅ ALWAYS filter by active shop_id
     parts_locations = list(
-        sdb.parts_locations.find(loc_filter).sort([("name", 1), ("created_at", 1)])
+        sdb.parts_locations.find({"shop_id": shop_oid}).sort([("name", 1), ("created_at", 1)])
     )
     parts_categories = list(
-        sdb.parts_categories.find(cat_filter).sort([("name", 1), ("created_at", 1)])
+        sdb.parts_categories.find({"shop_id": shop_oid}).sort([("name", 1), ("created_at", 1)])
     )
 
-    # режим редактирования (без JS)
     edit_location_id = request.args.get("edit_location_id") or None
     edit_category_id = request.args.get("edit_category_id") or None
 
@@ -234,7 +233,7 @@ def parts_settings_index():
 @login_required
 @permission_required("parts.edit")
 def parts_locations_create():
-    master, sdb = _require_shop_db_or_redirect()
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
     if sdb is None:
         return redirect(url_for("settings.parts_settings_index"))
 
@@ -243,7 +242,6 @@ def parts_locations_create():
         flash("Location name is required.", "error")
         return redirect(url_for("settings.parts_settings_index"))
 
-    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
     doc = {
         "name": name,
         "shop_id": shop_oid,
@@ -261,12 +259,11 @@ def parts_locations_create():
 @login_required
 @permission_required("parts.edit")
 def parts_locations_update(location_id: str):
-    master, sdb = _require_shop_db_or_redirect()
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
     if sdb is None:
         return redirect(url_for("settings.parts_settings_index"))
 
-    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
-    existing = _find_one_by_id(sdb.parts_locations, location_id, {"shop_id": shop_oid} if shop_oid else None)
+    existing = _find_one_by_id(sdb.parts_locations, location_id, {"shop_id": shop_oid})
     if not existing:
         flash("Location not found.", "error")
         return redirect(url_for("settings.parts_settings_index"))
@@ -288,12 +285,11 @@ def parts_locations_update(location_id: str):
 @login_required
 @permission_required("parts.edit")
 def parts_locations_delete(location_id: str):
-    master, sdb = _require_shop_db_or_redirect()
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
     if sdb is None:
         return redirect(url_for("settings.parts_settings_index"))
 
-    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
-    existing = _find_one_by_id(sdb.parts_locations, location_id, {"shop_id": shop_oid} if shop_oid else None)
+    existing = _find_one_by_id(sdb.parts_locations, location_id, {"shop_id": shop_oid})
     if not existing:
         flash("Location not found.", "error")
         return redirect(url_for("settings.parts_settings_index"))
@@ -311,7 +307,7 @@ def parts_locations_delete(location_id: str):
 @login_required
 @permission_required("parts.edit")
 def parts_categories_create():
-    master, sdb = _require_shop_db_or_redirect()
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
     if sdb is None:
         return redirect(url_for("settings.parts_settings_index"))
 
@@ -320,7 +316,6 @@ def parts_categories_create():
         flash("Category name is required.", "error")
         return redirect(url_for("settings.parts_settings_index"))
 
-    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
     doc = {
         "name": name,
         "shop_id": shop_oid,
@@ -338,12 +333,11 @@ def parts_categories_create():
 @login_required
 @permission_required("parts.edit")
 def parts_categories_update(category_id: str):
-    master, sdb = _require_shop_db_or_redirect()
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
     if sdb is None:
         return redirect(url_for("settings.parts_settings_index"))
 
-    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
-    existing = _find_one_by_id(sdb.parts_categories, category_id, {"shop_id": shop_oid} if shop_oid else None)
+    existing = _find_one_by_id(sdb.parts_categories, category_id, {"shop_id": shop_oid})
     if not existing:
         flash("Category not found.", "error")
         return redirect(url_for("settings.parts_settings_index"))
@@ -365,12 +359,11 @@ def parts_categories_update(category_id: str):
 @login_required
 @permission_required("parts.edit")
 def parts_categories_delete(category_id: str):
-    master, sdb = _require_shop_db_or_redirect()
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
     if sdb is None:
         return redirect(url_for("settings.parts_settings_index"))
 
-    shop_oid = _maybe_object_id(session.get(SESSION_SHOP_ID))
-    existing = _find_one_by_id(sdb.parts_categories, category_id, {"shop_id": shop_oid} if shop_oid else None)
+    existing = _find_one_by_id(sdb.parts_categories, category_id, {"shop_id": shop_oid})
     if not existing:
         flash("Category not found.", "error")
         return redirect(url_for("settings.parts_settings_index"))
