@@ -48,7 +48,7 @@ def _load_current_tenant(master):
 
 def _render_settings_page(template_name: str, **ctx):
     """
-    Один общий рендер для settings-страниц через единый layout builder.
+    Общий рендер для settings-страниц через единый layout builder.
     """
     layout = build_app_layout_context(filter_nav_items(NAV_ITEMS), "settings")
 
@@ -83,30 +83,118 @@ def make_shop_db_name(tenant_slug: str, shop_slug: str) -> str:
     return f"shop_{t10}_{s10}_{h6}"[:38]
 
 
+# -----------------------------
+# NEW: parts categories seeding (shop DB)
+# -----------------------------
+
+DEFAULT_PARTS_CATEGORIES = [
+    "Filters",
+    "Electrical",
+    "Exhaust",
+    "Body",
+    "Interior",
+    "DEF",
+    "Cores",
+]
+
+
+def _slugify_simple(name: str) -> str:
+    s = (name or "").strip().lower()
+    out = []
+    last_dash = False
+    for ch in s:
+        if ch.isalnum():
+            out.append(ch)
+            last_dash = False
+        else:
+            if not last_dash:
+                out.append("-")
+                last_dash = True
+    slug = "".join(out).strip("-")
+    return slug or "category"
+
+
+def seed_parts_categories(shop_db, shop_id: ObjectId):
+    """
+    Ensure default parts categories exist in shop DB (idempotent).
+    """
+    if shop_db is None or shop_id is None:
+        return
+
+    col = shop_db.parts_categories
+
+    # Prevent duplicates per shop
+    try:
+        col.create_index([("shop_id", 1), ("slug", 1)], unique=True, name="uniq_parts_categories_shop_slug")
+    except Exception:
+        pass
+
+    now = utcnow()
+
+    for name in DEFAULT_PARTS_CATEGORIES:
+        slug = _slugify_simple(name)
+        col.update_one(
+            {"shop_id": shop_id, "slug": slug},
+            {
+                "$setOnInsert": {
+                    "name": name,
+                    "slug": slug,
+                    "shop_id": shop_id,
+                    "is_active": True,
+                    "created_at": now,
+                },
+                "$set": {
+                    "updated_at": now,
+                },
+            },
+            upsert=True,
+        )
+
+
 def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     """
-    Чтобы Mongo реально создал базу (и Compass её показал) — создаём коллекцию settings.
+    Создаём базу шапа + сидим дефолтные parts_categories.
+    Идемпотентно: можно вызвать несколько раз.
     """
     client = get_mongo_client()
     sdb = client[shop_db_name]
 
-    if sdb.settings.count_documents({"key": "shop"}) == 0:
-        sdb.settings.insert_many([
-            {
-                "key": "shop",
-                "shop_name": shop_doc["name"],
-                "shop_slug": shop_doc.get("slug"),
-                "created_at": utcnow(),
-            },
-            {
-                "key": "tenant_ref",
-                "tenant_name": tenant_doc.get("name"),
-                "tenant_slug": tenant_doc.get("slug"),
-                "created_at": utcnow(),
-            },
-        ])
+    now = utcnow()
+
+    # settings: делаем upsert, чтобы не ловить duplicate key
+    sdb.settings.update_one(
+        {"key": "shop"},
+        {"$setOnInsert": {
+            "key": "shop",
+            "shop_name": shop_doc.get("name"),
+            "shop_slug": shop_doc.get("slug"),
+            "created_at": now,
+        }},
+        upsert=True
+    )
+
+    sdb.settings.update_one(
+        {"key": "tenant_ref"},
+        {"$setOnInsert": {
+            "key": "tenant_ref",
+            "tenant_name": tenant_doc.get("name"),
+            "tenant_slug": tenant_doc.get("slug"),
+            "created_at": now,
+        }},
+        upsert=True
+    )
 
     sdb.settings.create_index("key", unique=True, name="uniq_settings_key")
+
+    # ✅ seed default categories (needs shop_id)
+    shop_id = shop_doc.get("_id")
+    if isinstance(shop_id, ObjectId):
+        seed_parts_categories(sdb, shop_id)
+    elif shop_id is not None:
+        try:
+            seed_parts_categories(sdb, ObjectId(str(shop_id)))
+        except Exception:
+            pass
 
 
 def _grant_shop_to_owners(master, tenant_id, new_shop_id):
@@ -203,10 +291,13 @@ def locations_index():
             res = master.shops.insert_one(shop_doc)
             new_shop_id = res.inserted_id
 
+            # ✅ IMPORTANT: нужен _id для seed parts_categories
+            shop_doc["_id"] = new_shop_id
+
             # ✅ доступ выдаём только owners
             _grant_shop_to_owners(master, tenant["_id"], new_shop_id)
 
-            # ✅ создать shop DB
+            # ✅ создать shop DB + seed parts_categories
             init_shop_database(shop_db_name, tenant, shop_doc)
 
             flash("Shop created successfully.", "success")
@@ -321,9 +412,13 @@ def api_locations_create():
         res = master.shops.insert_one(shop_doc)
         new_shop_id = res.inserted_id
 
+        # ✅ IMPORTANT: нужен _id для seed parts_categories
+        shop_doc["_id"] = new_shop_id
+
         # ✅ доступ выдаём только owners
         _grant_shop_to_owners(master, tenant["_id"], new_shop_id)
 
+        # ✅ создать shop DB + seed parts_categories
         init_shop_database(shop_db_name, tenant, shop_doc)
 
         return jsonify({

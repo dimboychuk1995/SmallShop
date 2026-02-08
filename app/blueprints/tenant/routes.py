@@ -4,6 +4,7 @@ import re
 import hashlib
 from datetime import datetime, timezone
 
+from bson import ObjectId
 from flask import request, jsonify
 from werkzeug.security import generate_password_hash
 from pymongo.errors import DuplicateKeyError
@@ -95,31 +96,119 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
         tdb.roles.insert_many(roles)
 
 
+# -----------------------------
+# NEW: default parts categories seeding
+# -----------------------------
+
+DEFAULT_PARTS_CATEGORIES = [
+    "Filters",
+    "Electrical",
+    "Exhaust",
+    "Body",
+    "Interior",
+    "DEF",
+    "Cores",
+]
+
+
+def _slugify_simple(name: str) -> str:
+    s = (name or "").strip().lower()
+    out = []
+    last_dash = False
+    for ch in s:
+        if ch.isalnum():
+            out.append(ch)
+            last_dash = False
+        else:
+            if not last_dash:
+                out.append("-")
+                last_dash = True
+    slug = "".join(out).strip("-")
+    return slug or "category"
+
+
+def seed_parts_categories(shop_db, shop_id: ObjectId):
+    """
+    Ensure default parts categories exist in shop DB (idempotent).
+    """
+    if shop_db is None or shop_id is None:
+        return
+
+    col = shop_db.parts_categories
+
+    # Prevent duplicates per shop
+    try:
+        col.create_index([("shop_id", 1), ("slug", 1)], unique=True, name="uniq_parts_categories_shop_slug")
+    except Exception:
+        pass
+
+    now = utcnow()
+
+    for name in DEFAULT_PARTS_CATEGORIES:
+        slug = _slugify_simple(name)
+        col.update_one(
+            {"shop_id": shop_id, "slug": slug},
+            {
+                "$setOnInsert": {
+                    "name": name,
+                    "slug": slug,
+                    "shop_id": shop_id,
+                    "is_active": True,
+                    "created_at": now,
+                },
+                "$set": {
+                    "updated_at": now,
+                },
+            },
+            upsert=True,
+        )
+
+
 def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     """
-    Creates shop DB and seeds minimal defaults.
+    Creates shop DB and seeds minimal defaults + default parts categories.
     """
     client = get_mongo_client()
     sdb = client[shop_db_name]
 
     # create at least one collection so DB shows up in Compass
-    sdb.settings.insert_many([
-        {
+    # (делаем идемпотентно, чтобы не ловить duplicate key по settings.key)
+    now = utcnow()
+
+    sdb.settings.update_one(
+        {"key": "shop"},
+        {"$setOnInsert": {
             "key": "shop",
             "shop_name": shop_doc["name"],
             "shop_slug": shop_doc.get("slug"),
-            "created_at": utcnow(),
-        },
-        {
+            "created_at": now,
+        }},
+        upsert=True
+    )
+
+    sdb.settings.update_one(
+        {"key": "tenant_ref"},
+        {"$setOnInsert": {
             "key": "tenant_ref",
             "tenant_name": tenant_doc["name"],
             "tenant_slug": tenant_doc["slug"],
             "timezone": tenant_doc.get("timezone", "UTC"),
-            "created_at": utcnow(),
-        }
-    ])
+            "created_at": now,
+        }},
+        upsert=True
+    )
 
     sdb.settings.create_index("key", unique=True, name="uniq_settings_key")
+
+    # ✅ seed default categories (нужен shop_id)
+    shop_id = shop_doc.get("_id")
+    if isinstance(shop_id, ObjectId):
+        seed_parts_categories(sdb, shop_id)
+    elif shop_id is not None:
+        try:
+            seed_parts_categories(sdb, ObjectId(str(shop_id)))
+        except Exception:
+            pass
 
 
 @tenant_bp.post("/register")
@@ -202,6 +291,9 @@ def register_tenant():
         shop_res = master.shops.insert_one(shop_doc)
         shop_id = shop_res.inserted_id
 
+        # ✅ IMPORTANT: нужен shop_id для seed parts_categories
+        shop_doc["_id"] = shop_id
+
         # ✅ user has ONLY shop_ids; NO shop_id field
         user_doc = {
             "tenant_id": tenant_id,
@@ -222,7 +314,7 @@ def register_tenant():
         init_tenant_database(tenant_db_name, tenant_doc)
         created_tenant_db = True
 
-        # Create shop DB
+        # Create shop DB (will seed parts_categories)
         init_shop_database(shop_db_name, tenant_doc, shop_doc)
         created_shop_db = True
 
