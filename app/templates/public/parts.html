@@ -3,10 +3,218 @@
 {% block page_title %}Parts{% endblock %}
 
 {% block app_content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h1 class="h4 mb-1">Parts</h1>
+    <div class="text-muted small">In stock parts (active only).</div>
+  </div>
+
+  <button type="button" class="btn btn-primary"
+          data-bs-toggle="modal" data-bs-target="#createPartModal">
+    <i class="bi bi-plus-lg me-1"></i> Add Part
+  </button>
+</div>
+
 <div class="card">
   <div class="card-body">
-    <h1 class="h4 mb-2">Parts</h1>
-    <p class="text-muted mb-0">Empty page.</p>
+
+    {% if parts and parts|length > 0 %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="min-width:160px;">Part #</th>
+              <th style="min-width:260px;">Description</th>
+              <th style="min-width:180px;">Reference</th>
+              <th class="text-end" style="width:120px;">In stock</th>
+              <th class="text-end" style="width:150px;">Avg cost</th>
+              <th style="min-width:180px;">Vendor</th>
+              <th style="min-width:180px;">Category</th>
+              <th style="min-width:180px;">Location</th>
+              <th class="text-end" style="width:220px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in parts %}
+              <tr>
+                <td class="fw-semibold">{{ p.part_number }}</td>
+                <td class="text-muted">
+                  {{ p.description if p.description else "-" }}
+                </td>
+                <td class="text-muted">
+                  {{ p.reference if p.reference else "-" }}
+                </td>
+                <td class="text-end">{{ p.in_stock if p.in_stock is not none else 0 }}</td>
+                <td class="text-end">
+                  {% if p.average_cost is not none %}
+                    {{ "%.2f"|format(p.average_cost) }}
+                  {% else %}
+                    0.00
+                  {% endif %}
+                </td>
+
+                <td class="text-muted">
+                  {% if p.vendor_name %}
+                    {{ p.vendor_name }}
+                  {% elif p.vendor_id %}
+                    <span class="small">#{{ p.vendor_id }}</span>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+
+                <td class="text-muted">
+                  {% if p.category_name %}
+                    {{ p.category_name }}
+                  {% elif p.category_id %}
+                    <span class="small">#{{ p.category_id }}</span>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+
+                <td class="text-muted">
+                  {% if p.location_name %}
+                    {{ p.location_name }}
+                  {% elif p.location_id %}
+                    <span class="small">#{{ p.location_id }}</span>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+
+                <td class="text-end">
+                  {% if p.is_active is defined and p.is_active == false %}
+                    <form method="post" action="{{ url_for('parts.parts_restore', part_id=p._id) }}" class="d-inline">
+                      <button class="btn btn-sm btn-outline-success">
+                        Restore
+                      </button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="{{ url_for('parts.parts_deactivate', part_id=p._id) }}" class="d-inline">
+                      <button class="btn btn-sm btn-outline-danger"
+                              onclick="return confirm('Deactivate this part?');">
+                        Deactivate
+                      </button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">No parts in stock.</div>
+    {% endif %}
+
+  </div>
+</div>
+
+<!-- Create Part Modal -->
+<div class="modal fade" id="createPartModal" tabindex="-1" aria-labelledby="createPartModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('parts.parts_create') }}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="createPartModalLabel">Create new part</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="row g-3">
+
+            <div class="col-md-6">
+              <label class="form-label">Part number <span class="text-danger">*</span></label>
+              <input name="part_number" class="form-control" required autocomplete="off" />
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Reference</label>
+              <input name="reference" class="form-control" autocomplete="off" />
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">Description</label>
+              <input name="description" class="form-control" autocomplete="off" />
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">In stock</label>
+              <input name="in_stock" type="number" min="0" step="1" value="0" class="form-control" />
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Average cost</label>
+              <input name="average_cost" type="number" min="0" step="0.01" value="0" class="form-control" />
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Vendor</label>
+              <select name="vendor_id" class="form-select">
+                <option value="">-- None --</option>
+                {% if vendors and vendors|length > 0 %}
+                  {% for v in vendors %}
+                    <option value="{{ v._id }}">
+                      {{ v.name if v.name else (v.company_name if v.company_name else v._id) }}
+                    </option>
+                  {% endfor %}
+                {% else %}
+                  <option value="" disabled>(No vendors found)</option>
+                {% endif %}
+              </select>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Category</label>
+              <select name="category_id" class="form-select">
+                <option value="">-- None --</option>
+                {% if categories and categories|length > 0 %}
+                  {% for c in categories %}
+                    <option value="{{ c._id }}">
+                      {{ c.name if c.name else c._id }}
+                    </option>
+                  {% endfor %}
+                {% else %}
+                  <option value="" disabled>(No categories found)</option>
+                {% endif %}
+              </select>
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Location</label>
+              <select name="location_id" class="form-select">
+                <option value="">-- None --</option>
+                {% if locations and locations|length > 0 %}
+                  {% for l in locations %}
+                    <option value="{{ l._id }}">
+                      {{ l.name if l.name else l._id }}
+                    </option>
+                  {% endfor %}
+                {% else %}
+                  <option value="" disabled>(No locations found)</option>
+                {% endif %}
+              </select>
+            </div>
+
+            <div class="col-12">
+              <div class="alert alert-info mb-0">
+                <div class="fw-semibold mb-1">Note</div>
+                <div class="small">
+                  Vendor / Category / Location are stored as <code>_id</code> from the current shop collections.
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 {% endblock %}
