@@ -10,6 +10,7 @@ from flask import (
     flash,
     session,
     request,
+    jsonify,
 )
 
 from app.blueprints.settings import settings_bp
@@ -195,6 +196,8 @@ def parts_settings_index():
             parts_categories=[],
             edit_location_id=None,
             edit_category_id=None,
+            pricing_mode="margin",
+            pricing_rules=[],
             error_message="Please select an active shop (and ensure it has a shop DB).",
         )
 
@@ -205,6 +208,11 @@ def parts_settings_index():
     parts_categories = list(
         sdb.parts_categories.find({"shop_id": shop_oid}).sort([("name", 1), ("created_at", 1)])
     )
+
+    # ✅ Load pricing rules from shop DB
+    pr_doc = sdb.parts_pricing_rules.find_one({"shop_id": shop_oid})
+    pricing_mode = (pr_doc or {}).get("mode") or "margin"
+    pricing_rules = (pr_doc or {}).get("rules") or []
 
     edit_location_id = request.args.get("edit_location_id") or None
     edit_category_id = request.args.get("edit_category_id") or None
@@ -221,9 +229,10 @@ def parts_settings_index():
         parts_categories=parts_categories,
         edit_location_id=edit_location_id,
         edit_category_id=edit_category_id,
+        pricing_mode=pricing_mode,
+        pricing_rules=pricing_rules,
         error_message=None,
     )
-
 
 # -----------------------------
 # CRUD: Parts Locations
@@ -371,3 +380,126 @@ def parts_categories_delete(category_id: str):
     sdb.parts_categories.delete_one({"_id": existing["_id"]})
     flash("Category deleted.", "success")
     return redirect(url_for("settings.parts_settings_index"))
+
+
+# -----------------------------
+# CRUD: Parts Pricing Rules
+# -----------------------------
+
+from flask import jsonify
+
+
+def _validate_pricing_rules_payload(payload: dict):
+    """
+    Validate and normalize payload:
+    {
+      "mode": "margin" | "markup",
+      "rules": [{"from": number, "to": number|null, "value_percent": number}, ...]
+    }
+    """
+    if not isinstance(payload, dict):
+        return False, "Invalid payload."
+
+    mode = (payload.get("mode") or "").strip().lower()
+    if mode not in ("margin", "markup"):
+        return False, "Mode must be 'margin' or 'markup'."
+
+    rules = payload.get("rules")
+    if not isinstance(rules, list):
+        return False, "Rules must be a list."
+
+    norm = []
+    for i, r in enumerate(rules):
+        if not isinstance(r, dict):
+            return False, f"Rule #{i+1} is invalid."
+
+        f = r.get("from")
+        t = r.get("to")
+        v = r.get("value_percent")
+
+        try:
+            f = float(f)
+        except Exception:
+            return False, f"Rule #{i+1}: 'from' must be a number."
+
+        if f < 0:
+            return False, f"Rule #{i+1}: 'from' must be >= 0."
+
+        if t in ("", None):
+            t = None
+        else:
+            try:
+                t = float(t)
+            except Exception:
+                return False, f"Rule #{i+1}: 'to' must be a number or empty."
+            if t < 0:
+                return False, f"Rule #{i+1}: 'to' must be >= 0."
+            if t <= f:
+                return False, f"Rule #{i+1}: 'to' must be > 'from'."
+
+        try:
+            v = float(v)
+        except Exception:
+            return False, f"Rule #{i+1}: 'value_percent' must be a number."
+
+        norm.append({"from": f, "to": t, "value_percent": v})
+
+    # sort by from to keep consistent
+    norm.sort(key=lambda x: x["from"])
+
+    return True, {"mode": mode, "rules": norm}
+
+
+@settings_bp.route("/parts-settings/pricing-rules", methods=["GET"])
+@login_required
+@permission_required("parts.edit")
+def parts_pricing_rules_get():
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
+    if sdb is None:
+        return jsonify({"ok": False, "error": "No active shop DB."}), 400
+
+    doc = sdb.parts_pricing_rules.find_one({"shop_id": shop_oid}) or {}
+    return jsonify({
+        "ok": True,
+        "mode": doc.get("mode") or "margin",
+        "rules": doc.get("rules") or [],
+    })
+
+
+@settings_bp.route("/parts-settings/pricing-rules/save", methods=["POST"])
+@login_required
+@permission_required("parts.edit")
+def parts_pricing_rules_save():
+    master, sdb, shop_oid = _require_shop_db_or_redirect()
+    if sdb is None:
+        return jsonify({"ok": False, "error": "No active shop DB."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    ok, result = _validate_pricing_rules_payload(payload)
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
+
+    # one doc per shop
+    try:
+        sdb.parts_pricing_rules.create_index([("shop_id", 1)], unique=True, name="uniq_parts_pricing_rules_shop")
+    except Exception:
+        pass
+
+    sdb.parts_pricing_rules.update_one(
+        {"shop_id": shop_oid},
+        {
+            "$set": {
+                "mode": result["mode"],
+                "rules": result["rules"],
+                "updated_at": utcnow(),
+            },
+            "$setOnInsert": {
+                "shop_id": shop_oid,
+                "created_at": utcnow(),
+                "is_active": True,
+            }
+        },
+        upsert=True
+    )
+
+    return jsonify({"ok": True})

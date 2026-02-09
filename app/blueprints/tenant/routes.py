@@ -166,20 +166,24 @@ def seed_parts_categories(shop_db, shop_id: ObjectId):
 
 def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     """
-    Creates shop DB and seeds minimal defaults + default parts categories.
+    Creates shop DB and seeds minimal defaults:
+    - settings (idempotent upsert)
+    - default parts categories (idempotent)
+    - default parts pricing rules (margin/markup ranges) (idempotent)
     """
     client = get_mongo_client()
     sdb = client[shop_db_name]
 
-    # create at least one collection so DB shows up in Compass
-    # (делаем идемпотентно, чтобы не ловить duplicate key по settings.key)
     now = utcnow()
 
+    # -----------------------------
+    # settings (idempotent)
+    # -----------------------------
     sdb.settings.update_one(
         {"key": "shop"},
         {"$setOnInsert": {
             "key": "shop",
-            "shop_name": shop_doc["name"],
+            "shop_name": shop_doc.get("name"),
             "shop_slug": shop_doc.get("slug"),
             "created_at": now,
         }},
@@ -190,25 +194,80 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
         {"key": "tenant_ref"},
         {"$setOnInsert": {
             "key": "tenant_ref",
-            "tenant_name": tenant_doc["name"],
-            "tenant_slug": tenant_doc["slug"],
+            "tenant_name": tenant_doc.get("name"),
+            "tenant_slug": tenant_doc.get("slug"),
             "timezone": tenant_doc.get("timezone", "UTC"),
             "created_at": now,
         }},
         upsert=True
     )
 
-    sdb.settings.create_index("key", unique=True, name="uniq_settings_key")
+    try:
+        sdb.settings.create_index("key", unique=True, name="uniq_settings_key")
+    except Exception:
+        pass
 
-    # ✅ seed default categories (нужен shop_id)
+    # -----------------------------
+    # resolve shop_id (ObjectId)
+    # -----------------------------
     shop_id = shop_doc.get("_id")
+    shop_oid = None
+
     if isinstance(shop_id, ObjectId):
-        seed_parts_categories(sdb, shop_id)
+        shop_oid = shop_id
     elif shop_id is not None:
         try:
-            seed_parts_categories(sdb, ObjectId(str(shop_id)))
+            shop_oid = ObjectId(str(shop_id))
         except Exception:
-            pass
+            shop_oid = None
+
+    if not shop_oid:
+        # without shop_id we cannot seed shop-scoped collections
+        return
+
+    # -----------------------------
+    # seed default categories
+    # -----------------------------
+    try:
+        seed_parts_categories(sdb, shop_oid)
+    except Exception:
+        pass
+
+    # -----------------------------
+    # seed default parts pricing rules (NEW)
+    # -----------------------------
+    col = sdb.parts_pricing_rules
+
+    # one rules doc per shop
+    try:
+        col.create_index([("shop_id", 1)], unique=True, name="uniq_parts_pricing_rules_shop")
+    except Exception:
+        pass
+
+    default_rules = [
+        {"from": 0, "to": 20, "value_percent": 100},
+        {"from": 20, "to": 100, "value_percent": 60},
+        {"from": 100, "to": None, "value_percent": 50},  # None = infinity
+    ]
+
+    # idempotent upsert
+    col.update_one(
+        {"shop_id": shop_oid},
+        {
+            "$setOnInsert": {
+                "shop_id": shop_oid,
+                "mode": "margin",          # "margin" or "markup"
+                "rules": default_rules,
+                "is_active": True,
+                "created_at": now,
+            },
+            "$set": {
+                "updated_at": now,
+            }
+        },
+        upsert=True
+    )
+
 
 
 @tenant_bp.post("/register")
