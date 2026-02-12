@@ -27,6 +27,11 @@ PERMISSIONS: dict[str, str] = {
     "vendors.edit": "Vendor: edit",
     "vendors.deactivate": "Vendor: deactivate",
 
+    # Customers (NEW)
+    "customers.view": "Customer: view",
+    "customers.edit": "Customer: edit/create",
+    "customers.deactivate": "Customer: deactivate",
+
     # Reports
     "reports.view": "View reports",
     "reports.export": "Export reports",
@@ -115,8 +120,8 @@ def build_default_roles() -> list[dict]:
         "work_orders.view",
     })
 
-    # Viewer (добавил как полезный минимум)
-    # + vendors.view (офис/аудит часто надо хотя бы видеть список вендоров)
+    # Viewer (минимальный просмотр)
+    # + vendors.view, customers.view (офис/аудит часто надо видеть справочники)
     viewer = _safe_subset({
         "dashboard.view",
         "parts.view",
@@ -124,6 +129,7 @@ def build_default_roles() -> list[dict]:
         "reports.view",
         "settings.view",
         "vendors.view",
+        "customers.view",
     })
 
     return [

@@ -16,10 +16,12 @@ def index():
 NAV_ITEMS = [
     {"key": "dashboard", "label": "Dashboard", "endpoint": "main.dashboard"},
 
-    # было: "main.parts"
     {"key": "parts", "label": "Parts", "endpoint": "parts.parts_page"},
-
     {"key": "vendors", "label": "Vendors", "endpoint": "vendors.vendors_page"},
+
+    # ✅ NEW
+    {"key": "customers", "label": "Customers", "endpoint": "customers.customers_page"},
+
     {"key": "work_orders", "label": "Work Orders", "endpoint": "main.work_orders"},
     {"key": "settings", "label": "Settings", "endpoint": "main.settings"},
     {"key": "reports", "label": "Reports", "endpoint": "main.reports"},
