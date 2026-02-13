@@ -58,6 +58,7 @@ def create_app():
     from app.blueprints.vendors import vendors_bp
     from app.blueprints.parts import parts_bp
     from app.blueprints.customers import customers_bp
+    from app.blueprints.work_orders import work_orders_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -66,5 +67,6 @@ def create_app():
     app.register_blueprint(vendors_bp)
     app.register_blueprint(parts_bp)
     app.register_blueprint(customers_bp)
+    app.register_blueprint(work_orders_bp)
 
     return app

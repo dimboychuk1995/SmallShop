@@ -18,11 +18,8 @@ NAV_ITEMS = [
 
     {"key": "parts", "label": "Parts", "endpoint": "parts.parts_page"},
     {"key": "vendors", "label": "Vendors", "endpoint": "vendors.vendors_page"},
-
-    # ✅ NEW
     {"key": "customers", "label": "Customers", "endpoint": "customers.customers_page"},
-
-    {"key": "work_orders", "label": "Work Orders", "endpoint": "main.work_orders"},
+    {"key": "work_orders", "label": "Work Orders", "endpoint": "work_orders.work_orders_page"},
     {"key": "settings", "label": "Settings", "endpoint": "main.settings"},
     {"key": "reports", "label": "Reports", "endpoint": "main.reports"},
 ]
@@ -152,7 +149,9 @@ def _render_app_page(template_name: str, active_page: str, **ctx):
         active_page=active_page,
 
         # ✅ для шаблонов
-        user_permissions=user_permissions,
+        user_permissions=user_permissions,          # список
+        user_permissions_list=user_permissions,     # алиас под твой DEBUG блок
+        user_permissions_set=perms_set,             # удобно: {% if 'x' in user_permissions_set %}
     )
 
     payload.update(ctx)
@@ -212,14 +211,6 @@ def set_active_shop():
 @permission_required("dashboard.view")
 def dashboard():
     return _render_app_page("public/dashboard.html", active_page="dashboard")
-
-
-
-@main_bp.get("/work-orders")
-@login_required
-@permission_required("work_orders.view")
-def work_orders():
-    return _render_app_page("public/work_orders.html", active_page="work_orders")
 
 
 @main_bp.get("/settings")

@@ -1,0 +1,18 @@
+{% extends "layouts/app_base.html" %}
+
+{% block page_title %}Work Order Details{% endblock %}
+
+{% block app_content %}
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h1 class="h4 mb-0">Work Order Details</h1>
+      <a class="btn btn-outline-secondary" href="{{ url_for('work_orders.work_orders_page') }}">Back</a>
+    </div>
+
+    <p class="text-muted mb-0">
+      Work order creation / details form will be here.
+    </p>
+  </div>
+</div>
+{% endblock %}
