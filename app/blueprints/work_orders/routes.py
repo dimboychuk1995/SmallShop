@@ -330,8 +330,26 @@ def create_work_order():
     }
 
     res = shop_db.work_orders.insert_one(wo)
-    wo_id = res.inserted_id  # ✅ fixed
+    wo_id = res.inserted_id
 
-    return redirect(url_for("work_orders.work_order_details_view", work_order_id=str(wo_id)))
+    flash("Work order created.", "success")
+
+    # --- render SAME page (no redirect) ---
+    customers = _get_customers(shop_db)
+    customers_ui = [{"id": str(c["_id"]), "label": _customer_display(c)} for c in customers]
+
+    units = _get_units(shop_db, customer_id)
+    units_ui = [{"id": str(u["_id"]), "label": _unit_display(u)} for u in units]
+
+    return _render_app_page(
+        "public/work_orders/work_order_details.html",
+        active_page="work_orders",
+        customers=customers_ui,
+        units=units_ui,
+        selected_customer_id=str(customer_id),
+        selected_unit_id=str(unit_id),
+        auto_open_unit_modal=False,
+        created_work_order_id=str(wo_id),  # optional
+    )
 
 
