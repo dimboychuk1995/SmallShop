@@ -2,11 +2,6 @@
 {% block page_title %}Work Order Details{% endblock %}
 
 {% block app_content %}
-
-<input class="form-control form-control-sm part-number" name="part_number_0" maxlength="64" autocomplete="off">
-<input class="form-control form-control-sm part-description" name="part_description_0" maxlength="200" autocomplete="off">
-
-
 <div class="card">
   <div class="card-body">
 
@@ -122,92 +117,102 @@
           <input type="hidden" name="unit_id" value="{{ selected_unit_id }}"/>
 
           <div class="d-flex flex-wrap gap-3 align-items-center mb-3 text-muted small">
-            <div>Labor total: <strong id="laborTotalDisplay">—</strong></div>
-            <div>Parts total: <strong id="partsTotalDisplay">—</strong></div>
             <div>Grand total: <strong id="grandTotalDisplay">—</strong></div>
           </div>
 
-          <div class="card border mb-3">
-            <div class="card-body">
-              <h2 class="h6 mb-3">Labor</h2>
-
-              <div class="row g-3">
-                <div class="col-md-6">
-                  <label class="form-label">Labor Description</label>
-                  <input name="labor_description" class="form-control" maxlength="200" value="{{ labor_description }}">
-                </div>
-
-                <div class="col-md-2">
-                  <label class="form-label">Hours</label>
-                  <input id="labor_hours" name="labor_hours" class="form-control" inputmode="decimal" value="{{ labor_hours }}">
-                </div>
-
-                <div class="col-md-4">
-                  <label class="form-label">Labor Rate</label>
-                  <select id="labor_rate_code" name="labor_rate_code" class="form-select">
-                    <option value="">-- Select rate --</option>
-                    {% for r in labor_rates %}
-                      <option value="{{ r.code }}" {% if r.code == labor_rate_code %}selected{% endif %}>
-                        {{ r.name }} (${{ "%.2f"|format(r.hourly_rate) }}/hr)
-                      </option>
-                    {% endfor %}
-                  </select>
-                </div>
-              </div>
-
-            </div>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="text-muted small">Blocks: <strong id="blockCount">1</strong></div>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="addBlockBtn">+ Add Block</button>
           </div>
 
-          <div class="card border">
-            <div class="card-body">
-              <h2 class="h6 mb-3">Parts</h2>
+          <div id="blocksContainer">
 
-              <div class="table-responsive">
-                <table class="table table-sm align-middle">
-                  <thead class="table-light">
-                    <tr>
-                      <th style="width:18%;">Part Number</th>
-                      <th>Description</th>
-                      <th style="width:10%;">Count</th>
-                      <th style="width:14%;">Cost</th>
-                      <th style="width:14%;">Price</th>
-                      <th style="width:14%;">Line Total</th>
-                    </tr>
-                  </thead>
+            <!-- Block template instance #0 -->
+            <div class="card border mb-3 wo-block" data-block-index="0">
+              <div class="card-body">
 
-                  <tbody id="partsTbody">
-                    <tr class="parts-row" data-index="0">
-                      <td>
-                        <input class="form-control form-control-sm part-number" name="part_number_0" maxlength="64">
-                      </td>
-                      <td>
-                        <input class="form-control form-control-sm part-description" name="part_description_0" maxlength="200">
-                      </td>
-                      <td>
-                        <input class="form-control form-control-sm part-qty" name="part_qty_0" inputmode="numeric">
-                      </td>
-                      <td>
-                        <input class="form-control form-control-sm part-cost" name="part_cost_0" inputmode="decimal">
-                      </td>
-                      <td>
-                        <input class="form-control form-control-sm part-price" value="" readonly tabindex="-1">
-                      </td>
-                      <td class="part-line-total">
-                        <span class="text-muted">—</span>
-                      </td>
-                    </tr>
-                  </tbody>
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <h2 class="h6 mb-0">Block <span class="block-number">1</span></h2>
+                    <div class="text-muted small mt-1">
+                      Labor: <strong class="laborTotalDisplay">—</strong>
+                      &nbsp;|&nbsp;
+                      Parts: <strong class="partsTotalDisplay">—</strong>
+                      &nbsp;|&nbsp;
+                      Block total: <strong class="blockTotalDisplay">—</strong>
+                    </div>
+                  </div>
 
-                </table>
+                  <button type="button" class="btn btn-outline-danger btn-sm removeBlockBtn" disabled>
+                    Remove
+                  </button>
+                </div>
+
+                <hr class="my-3"/>
+
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Labor Description</label>
+                    <input class="form-control labor-description" name="blocks[0][labor_description]" maxlength="200">
+                  </div>
+
+                  <div class="col-md-2">
+                    <label class="form-label">Hours</label>
+                    <input class="form-control labor-hours" name="blocks[0][labor_hours]" inputmode="decimal">
+                  </div>
+
+                  <div class="col-md-4">
+                    <label class="form-label">Labor Rate</label>
+                    <select class="form-select labor-rate" name="blocks[0][labor_rate_code]">
+                      <option value="">-- Select rate --</option>
+                      {% for r in labor_rates %}
+                        <option value="{{ r.code }}">{{ r.name }} (${{ "%.2f"|format(r.hourly_rate) }}/hr)</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <h3 class="h6 mb-2">Parts</h3>
+
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                      <thead class="table-light">
+                        <tr>
+                          <th style="width:18%;">Part Number</th>
+                          <th>Description</th>
+                          <th style="width:10%;">Count</th>
+                          <th style="width:14%;">Cost</th>
+                          <th style="width:14%;">Price</th>
+                          <th style="width:14%;">Line Total</th>
+                        </tr>
+                      </thead>
+
+                      <tbody class="partsTbody">
+                        <tr class="parts-row" data-index="0">
+                          <td><input class="form-control form-control-sm part-number" name="blocks[0][parts][0][part_number]" maxlength="64" autocomplete="off"></td>
+                          <td><input class="form-control form-control-sm part-description" name="blocks[0][parts][0][description]" maxlength="200" autocomplete="off"></td>
+                          <td><input class="form-control form-control-sm part-qty" name="blocks[0][parts][0][qty]" inputmode="numeric"></td>
+                          <td><input class="form-control form-control-sm part-cost" name="blocks[0][parts][0][cost]" inputmode="decimal"></td>
+                          <td><input class="form-control form-control-sm part-price" value="" readonly tabindex="-1"></td>
+                          <td class="part-line-total"><span class="text-muted">—</span></td>
+                        </tr>
+                      </tbody>
+
+                    </table>
+                  </div>
+                </div>
+
               </div>
-
-              <div class="mt-3 d-flex justify-content-end gap-2">
-                <button class="btn btn-outline-secondary" type="submit" name="action" value="recalc">Save Draft</button>
-                <button class="btn btn-primary" type="submit" name="action" value="create">Create Work Order</button>
-              </div>
-
             </div>
+
           </div>
+
+          <div class="mt-3 d-flex justify-content-end gap-2">
+            <button class="btn btn-outline-secondary" type="submit" name="action" value="recalc">Save Draft</button>
+            <button class="btn btn-primary" type="submit" name="action" value="create">Create Work Order</button>
+          </div>
+
         </form>
 
         <script src="{{ url_for('static', filename='js/work_orders/work_order_details.js') }}"></script>
