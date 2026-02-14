@@ -297,6 +297,8 @@ def api_parts_search():
     Returns:
       {"items":[{id, part_number, description, reference, average_cost, in_stock}]}
     """
+    import re
+
     shop_db, shop = get_shop_db()
     if shop_db is None:
         return jsonify({"items": [], "error": "shop_db_missing"}), 200
@@ -311,13 +313,10 @@ def api_parts_search():
         limit = 20
     limit = max(1, min(limit, 50))
 
-    # For speed: prefix match on part_number first, then partial on description/reference.
-    # Later you will add indexes:
-    #   parts: {shop_id:1, is_active:1, part_number:1}
-    #   parts: {shop_id:1, is_active:1, description:1}
-    q_escaped = q.replace("\\", "\\\\")
+    # Escape for regex
+    q_escaped = re.escape(q)
     starts = f"^{q_escaped}"
-    contains = q_escaped  # simple contains regex
+    contains = q_escaped  # regex "contains"
 
     parts_col = shop_db.parts
 
@@ -325,7 +324,11 @@ def api_parts_search():
         "shop_id": shop["_id"],
         "is_active": True,
         "$or": [
+            # part_number: prefix first (fast + nice UX)
             {"part_number": {"$regex": starts, "$options": "i"}},
+            # part_number: contains (fix: "225" matches "10-225")
+            {"part_number": {"$regex": contains, "$options": "i"}},
+            # other fields already contain
             {"description": {"$regex": contains, "$options": "i"}},
             {"reference": {"$regex": contains, "$options": "i"}},
         ],
@@ -339,8 +342,6 @@ def api_parts_search():
         "in_stock": 1,
     }
 
-    # Sort: prefer part_number prefix matches first, then by part_number
-    # (Mongo can't sort by "prefix match" easily without $meta; we keep simple)
     cursor = parts_col.find(query, projection).sort([("part_number", 1)]).limit(limit)
 
     items = []
