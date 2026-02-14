@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
 
 from bson import ObjectId
 from flask import request, session, redirect, url_for, flash
@@ -14,10 +13,6 @@ from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
 from app.utils.permissions import permission_required
 
 
-# -----------------------------
-# tiny utils
-# -----------------------------
-
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -28,18 +23,6 @@ def oid(v):
     try:
         return ObjectId(str(v))
     except Exception:
-        return None
-
-
-def dec(v):
-    if v is None:
-        return None
-    s = str(v).strip()
-    if not s:
-        return None
-    try:
-        return Decimal(s)
-    except (InvalidOperation, ValueError):
         return None
 
 
@@ -126,17 +109,25 @@ def unit_label(u: dict) -> str:
 
 
 def get_customers(shop_db):
-    rows = list(shop_db.customers.find({"is_active": True}).sort([("company_name", 1), ("last_name", 1), ("first_name", 1)]))
+    rows = list(
+        shop_db.customers.find({"is_active": True}).sort(
+            [("company_name", 1), ("last_name", 1), ("first_name", 1)]
+        )
+    )
     return [{"id": str(x["_id"]), "label": customer_label(x)} for x in rows]
 
 
 def get_units(shop_db, customer_id: ObjectId):
-    rows = list(shop_db.units.find({"customer_id": customer_id, "is_active": True}).sort([("created_at", -1)]))
+    rows = list(
+        shop_db.units.find({"customer_id": customer_id, "is_active": True}).sort([("created_at", -1)])
+    )
     return [{"id": str(x["_id"]), "label": unit_label(x)} for x in rows]
 
 
 def get_labor_rates(shop_db, shop_id: ObjectId):
-    rows = list(shop_db.labor_rates.find({"shop_id": shop_id, "is_active": True}).sort([("name", 1)]))
+    rows = list(
+        shop_db.labor_rates.find({"shop_id": shop_id, "is_active": True}).sort([("name", 1)])
+    )
     return [
         {
             "code": r.get("code") or "",
@@ -188,27 +179,17 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
     units = []
     if customer_id:
         units = get_units(shop_db, customer_id)
-
-        # protect: if unit not in that customer -> clear
         if unit_id and not any(u["id"] == str(unit_id) for u in units):
             unit_id = None
 
-    labor_rates = get_labor_rates(shop_db, shop["_id"])
-    pricing_rules = get_pricing_rules_json(shop_db, shop["_id"])
-
     ctx = {
         "active_page": "work_orders",
-
         "customers": customers,
         "units": units,
-
         "selected_customer_id": str(customer_id) if customer_id else "",
         "selected_unit_id": str(unit_id) if unit_id else "",
-
-        "labor_rates": labor_rates,
-        "parts_pricing_rules": pricing_rules,
-
-        # for sticky form values (optional)
+        "labor_rates": get_labor_rates(shop_db, shop["_id"]),
+        "parts_pricing_rules": get_pricing_rules_json(shop_db, shop["_id"]),
         "labor_description": (form_state or {}).get("labor_description") or "",
         "labor_hours": (form_state or {}).get("labor_hours") or "",
         "labor_rate_code": (form_state or {}).get("labor_rate_code") or "",
@@ -216,10 +197,6 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
 
     return _render_app_page("public/work_orders/work_order_details.html", **ctx)
 
-
-# -----------------------------
-# routes
-# -----------------------------
 
 @work_orders_bp.get("/work_orders")
 @login_required
@@ -267,19 +244,15 @@ def create_unit():
 
     doc = {
         "customer_id": customer_id,
-
         "vin": (request.form.get("vin") or "").strip() or None,
         "unit_number": (request.form.get("unit_number") or "").strip() or None,
-
         "make": (request.form.get("make") or "").strip() or None,
         "model": (request.form.get("model") or "").strip() or None,
         "year": i32(request.form.get("year")),
         "type": (request.form.get("type") or "").strip() or None,
         "mileage": i32(request.form.get("mileage")),
-
         "shop_id": shop["_id"],
         "tenant_id": shop.get("tenant_id"),
-
         "is_active": True,
         "created_at": now,
         "updated_at": now,
@@ -299,8 +272,8 @@ def create_unit():
 @permission_required("work_orders.create")
 def preview_work_order():
     """
-    Сейчас: только чтобы страница не ломалась и данные не терялись.
-    Полное сохранение work order + lines сделаем следующим шагом.
+    Пока: просто сохраняем введённые labor поля, чтобы они не терялись.
+    Создание work order и сохранение lines — следующим шагом.
     """
     shop_db, shop = get_shop_db()
     if shop_db is None:

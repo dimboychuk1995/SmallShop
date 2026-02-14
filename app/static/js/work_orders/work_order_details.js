@@ -9,8 +9,10 @@
     const el = $(id);
     if (!el) return fallback;
     try {
-      return JSON.parse(el.textContent || "null") ?? fallback;
+      const txt = el.textContent || "null";
+      return JSON.parse(txt) ?? fallback;
     } catch (e) {
+      console.warn(`[work_order_details] JSON parse failed for #${id}`, e);
       return fallback;
     }
   }
@@ -32,47 +34,11 @@
     return Math.round(n * 100) / 100;
   }
 
-  function calcPriceFromRule(cost, mode, valuePercent) {
-    if (!Number.isFinite(cost) || cost <= 0) return null;
-    if (!Number.isFinite(valuePercent)) return null;
-
-    const vp = valuePercent / 100;
-
-    if (mode === "markup") {
-      // price = cost * (1 + markup%)
-      return round2(cost * (1 + vp));
-    }
-
-    // margin:
-    // margin = (price - cost)/price  => price = cost/(1 - margin)
-    const denom = 1 - vp;
-    if (denom <= 0) return round2(cost);
-    return round2(cost / denom);
-  }
-
-  function matchRule(cost, rules) {
-    if (!Number.isFinite(cost) || !Array.isArray(rules)) return null;
-
-    for (const r of rules) {
-      const from = toNum(r.from);
-      const to = r.to === null ? null : toNum(r.to);
-      const value_percent = toNum(r.value_percent);
-
-      if (from === null || value_percent === null) continue;
-      if (cost < from) continue;
-
-      if (to === null) return { value_percent };
-      if (cost <= to) return { value_percent };
-    }
-    return null;
-  }
-
   function getHourlyRate(rates, code) {
     if (!Array.isArray(rates) || !code) return null;
     const found = rates.find(x => String(x.code) === String(code));
     if (!found) return null;
-    const hr = toNum(found.hourly_rate);
-    return hr;
+    return toNum(found.hourly_rate);
   }
 
   function updateTotalsUI(laborTotal, partsTotal) {
@@ -84,27 +50,64 @@
     if (partsEl) partsEl.textContent = Number.isFinite(partsTotal) ? `$${money(partsTotal)}` : "—";
 
     const grand = (Number.isFinite(laborTotal) ? laborTotal : 0) + (Number.isFinite(partsTotal) ? partsTotal : 0);
-    if (grandEl) grandEl.textContent = (Number.isFinite(laborTotal) || Number.isFinite(partsTotal)) ? `$${money(round2(grand))}` : "—";
+    if (grandEl) {
+      grandEl.textContent =
+        (Number.isFinite(laborTotal) || Number.isFinite(partsTotal)) ? `$${money(round2(grand))}` : "—";
+    }
   }
 
-  function recalcLabor(rates) {
+  // ------------------ Labor ------------------
+
+  function recalcLabor(laborRates) {
     const hoursInput = $("labor_hours");
     const rateSelect = $("labor_rate_code");
-
     if (!hoursInput || !rateSelect) return null;
 
     const hours = toNum(hoursInput.value);
     const code = String(rateSelect.value || "").trim();
-
     if (hours === null || !code) return null;
 
-    const hr = getHourlyRate(rates, code);
+    const hr = getHourlyRate(laborRates, code);
     if (hr === null) return null;
 
     return round2(hours * hr);
   }
 
-  // ---------- Parts rows ----------
+  // ------------------ Parts pricing ------------------
+
+  function matchRule(cost, rules) {
+    if (!Number.isFinite(cost) || !Array.isArray(rules)) return null;
+
+    for (const r of rules) {
+      const from = toNum(r.from);
+      const to = (r.to === null || r.to === undefined) ? null : toNum(r.to);
+      const vp = toNum(r.value_percent);
+
+      if (from === null || vp === null) continue;
+      if (cost < from) continue;
+
+      if (to === null) return { value_percent: vp };
+      if (cost <= to) return { value_percent: vp };
+    }
+    return null;
+  }
+
+  function calcPriceFromRule(cost, mode, valuePercent) {
+    if (!Number.isFinite(cost) || cost <= 0) return null;
+    if (!Number.isFinite(valuePercent)) return null;
+
+    const vp = valuePercent / 100;
+
+    if (mode === "markup") {
+      // price = cost * (1 + markup%)
+      return round2(cost * (1 + vp));
+    }
+
+    // margin: price = cost/(1 - margin)
+    const denom = 1 - vp;
+    if (denom <= 0) return round2(cost);
+    return round2(cost / denom);
+  }
 
   function makePartsRow(index) {
     const tr = document.createElement("tr");
@@ -112,24 +115,12 @@
     tr.dataset.index = String(index);
 
     tr.innerHTML = `
-      <td>
-        <input class="form-control form-control-sm part-number" name="part_number_${index}" maxlength="64">
-      </td>
-      <td>
-        <input class="form-control form-control-sm part-description" name="part_description_${index}" maxlength="200">
-      </td>
-      <td>
-        <input class="form-control form-control-sm part-qty" name="part_qty_${index}" inputmode="numeric">
-      </td>
-      <td>
-        <input class="form-control form-control-sm part-cost" name="part_cost_${index}" inputmode="decimal">
-      </td>
-      <td>
-        <input class="form-control form-control-sm part-price" value="" readonly tabindex="-1">
-      </td>
-      <td class="part-line-total">
-        <span class="text-muted">—</span>
-      </td>
+      <td><input class="form-control form-control-sm part-number" name="part_number_${index}" maxlength="64"></td>
+      <td><input class="form-control form-control-sm part-description" name="part_description_${index}" maxlength="200"></td>
+      <td><input class="form-control form-control-sm part-qty" name="part_qty_${index}" inputmode="numeric"></td>
+      <td><input class="form-control form-control-sm part-cost" name="part_cost_${index}" inputmode="decimal"></td>
+      <td><input class="form-control form-control-sm part-price" value="" readonly tabindex="-1"></td>
+      <td class="part-line-total"><span class="text-muted">—</span></td>
     `;
     return tr;
   }
@@ -139,7 +130,14 @@
     const ds = tr.querySelector(".part-description")?.value || "";
     const q = tr.querySelector(".part-qty")?.value || "";
     const c = tr.querySelector(".part-cost")?.value || "";
-    return String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim();
+    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim());
+  }
+
+  function clearRowCalc(tr) {
+    const priceInput = tr.querySelector(".part-price");
+    const lineCell = tr.querySelector(".part-line-total");
+    if (priceInput) priceInput.value = "";
+    if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
   }
 
   function recalcRow(tr, pricing) {
@@ -149,30 +147,26 @@
     const priceInput = tr.querySelector(".part-price");
     const lineCell = tr.querySelector(".part-line-total");
 
-    if (!pricing || !Array.isArray(pricing.rules)) {
-      if (priceInput) priceInput.value = "";
-      if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
-      return { lineTotal: null };
+    if (!pricing || !Array.isArray(pricing.rules) || pricing.rules.length === 0) {
+      clearRowCalc(tr);
+      return null;
     }
 
     if (qty === null || qty <= 0 || cost === null || cost < 0) {
-      if (priceInput) priceInput.value = "";
-      if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
-      return { lineTotal: null };
+      clearRowCalc(tr);
+      return null;
     }
 
     const rule = matchRule(cost, pricing.rules);
     if (!rule) {
-      if (priceInput) priceInput.value = "";
-      if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
-      return { lineTotal: null };
+      clearRowCalc(tr);
+      return null;
     }
 
     const price = calcPriceFromRule(cost, pricing.mode, rule.value_percent);
     if (price === null) {
-      if (priceInput) priceInput.value = "";
-      if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
-      return { lineTotal: null };
+      clearRowCalc(tr);
+      return null;
     }
 
     const lineTotal = round2(price * qty);
@@ -180,28 +174,7 @@
     if (priceInput) priceInput.value = money(price);
     if (lineCell) lineCell.innerHTML = `<strong>$${money(lineTotal)}</strong>`;
 
-    return { lineTotal };
-  }
-
-  function recalcAllParts(tbody, pricing) {
-    let total = 0;
-    const rows = tbody.querySelectorAll("tr.parts-row");
-    rows.forEach(tr => {
-      const any = rowHasAnyInput(tr);
-      if (!any) {
-        // keep row empty display
-        const priceInput = tr.querySelector(".part-price");
-        const lineCell = tr.querySelector(".part-line-total");
-        if (priceInput) priceInput.value = "";
-        if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
-        return;
-      }
-
-      const r = recalcRow(tr, pricing);
-      if (r.lineTotal !== null && Number.isFinite(r.lineTotal)) total += r.lineTotal;
-    });
-    total = round2(total);
-    return total > 0 ? total : null;
+    return lineTotal;
   }
 
   function ensureTrailingEmptyRow(tbody) {
@@ -210,69 +183,82 @@
       tbody.appendChild(makePartsRow(0));
       return;
     }
-
     const last = rows[rows.length - 1];
     if (rowHasAnyInput(last)) {
       tbody.appendChild(makePartsRow(rows.length));
     }
   }
 
-  function attachPartsHandlers(tbody, pricing, laborRates) {
-    const handler = function () {
-      ensureTrailingEmptyRow(tbody);
+  function recalcAllParts(tbody, pricing) {
+    let total = 0;
 
-      const laborTotal = recalcLabor(laborRates);
-      const partsTotal = recalcAllParts(tbody, pricing);
+    const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
+    for (const tr of rows) {
+      if (!rowHasAnyInput(tr)) {
+        clearRowCalc(tr);
+        continue;
+      }
+      const lt = recalcRow(tr, pricing);
+      if (lt !== null && Number.isFinite(lt)) total += lt;
+    }
 
-      updateTotalsUI(
-        laborTotal !== null ? laborTotal : null,
-        partsTotal !== null ? partsTotal : null
-      );
-    };
-
-    tbody.addEventListener("input", (e) => {
-      if (e.target && e.target.closest("tr.parts-row")) handler();
-    });
-
-    // initial
-    handler();
+    total = round2(total);
+    return total > 0 ? total : null;
   }
 
-  function attachLaborHandlers(pricing, laborRates, tbody) {
-    const hoursInput = $("labor_hours");
-    const rateSelect = $("labor_rate_code");
+  function recalcAll(tbody, pricing, laborRates) {
+    ensureTrailingEmptyRow(tbody);
 
-    const handler = function () {
-      const laborTotal = recalcLabor(laborRates);
-      const partsTotal = tbody ? recalcAllParts(tbody, pricing) : null;
-      updateTotalsUI(
-        laborTotal !== null ? laborTotal : null,
-        partsTotal !== null ? partsTotal : null
-      );
-    };
+    const laborTotal = recalcLabor(laborRates);
+    const partsTotal = recalcAllParts(tbody, pricing);
 
-    if (hoursInput) hoursInput.addEventListener("input", handler);
-    if (rateSelect) rateSelect.addEventListener("change", handler);
-
-    // initial
-    handler();
+    updateTotalsUI(
+      laborTotal !== null ? laborTotal : null,
+      partsTotal !== null ? partsTotal : null
+    );
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    console.log("work_order_details.js loaded");
+
+    // visual hook
+    const hook = $("jsHook");
+    if (hook) hook.textContent = "JS loaded";
+
     const laborRates = readJsonScript("laborRatesData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
 
-    const tbody = $("partsTbody");
-    if (!tbody) return;
+    if (!pricing) {
+      console.warn("[work_order_details] partsPricingRulesData is null/empty => price will not calculate");
+    } else if (!Array.isArray(pricing.rules) || pricing.rules.length === 0) {
+      console.warn("[work_order_details] pricing.rules empty => price will not calculate", pricing);
+    }
 
-    // create initial single row if server didn't render rows
+    const tbody = $("partsTbody");
+    if (!tbody) {
+      console.warn("[work_order_details] #partsTbody not found");
+      return;
+    }
+
+    // Ensure at least one row exists
     if (tbody.querySelectorAll("tr.parts-row").length === 0) {
       tbody.appendChild(makePartsRow(0));
     }
 
-    ensureTrailingEmptyRow(tbody);
+    recalcAll(tbody, pricing, laborRates);
 
-    attachPartsHandlers(tbody, pricing, laborRates);
-    attachLaborHandlers(pricing, laborRates, tbody);
+    // parts input handlers
+    tbody.addEventListener("input", function (e) {
+      const t = e.target;
+      if (!t) return;
+      if (!t.closest("tr.parts-row")) return;
+      recalcAll(tbody, pricing, laborRates);
+    });
+
+    // labor handlers
+    const hoursInput = $("labor_hours");
+    const rateSelect = $("labor_rate_code");
+    if (hoursInput) hoursInput.addEventListener("input", () => recalcAll(tbody, pricing, laborRates));
+    if (rateSelect) rateSelect.addEventListener("change", () => recalcAll(tbody, pricing, laborRates));
   });
 })();
