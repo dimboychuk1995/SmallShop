@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-
 from bson import ObjectId
-from flask import request, session, redirect, url_for, flash
+from flask import request, session, redirect, url_for, flash, jsonify
 
 from app.blueprints.work_orders import work_orders_bp
 from app.blueprints.main.routes import _render_app_page
@@ -56,11 +54,6 @@ def tenant_id_variants():
 
 
 def get_shop_db():
-    """
-    Active shop in session:
-      session["shop_id"] must exist
-    Returns: (shop_db, shop_doc)
-    """
     master = get_master_db()
 
     shop_id = oid(session.get("shop_id"))
@@ -271,10 +264,6 @@ def create_unit():
 @login_required
 @permission_required("work_orders.create")
 def preview_work_order():
-    """
-    Пока: просто сохраняем введённые labor поля, чтобы они не терялись.
-    Создание work order и сохранение lines — следующим шагом.
-    """
     shop_db, shop = get_shop_db()
     if shop_db is None:
         flash("Shop database not configured.", "error")
@@ -290,3 +279,79 @@ def preview_work_order():
     }
 
     return render_details(shop_db, shop, customer_id, unit_id, form_state=form_state)
+
+
+# -----------------------------
+# FAST PARTS SEARCH API
+# -----------------------------
+
+@work_orders_bp.get("/work_orders/api/parts/search")
+@login_required
+@permission_required("work_orders.create")
+def api_parts_search():
+    """
+    Very fast search for parts in active shop DB.
+    Query params:
+      q: search string (min 3)
+      limit: default 20 (max 50)
+    Returns:
+      {"items":[{id, part_number, description, reference, average_cost, in_stock}]}
+    """
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"items": [], "error": "shop_db_missing"}), 200
+
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 3:
+        return jsonify({"items": []}), 200
+
+    try:
+        limit = int(request.args.get("limit") or 20)
+    except Exception:
+        limit = 20
+    limit = max(1, min(limit, 50))
+
+    # For speed: prefix match on part_number first, then partial on description/reference.
+    # Later you will add indexes:
+    #   parts: {shop_id:1, is_active:1, part_number:1}
+    #   parts: {shop_id:1, is_active:1, description:1}
+    q_escaped = q.replace("\\", "\\\\")
+    starts = f"^{q_escaped}"
+    contains = q_escaped  # simple contains regex
+
+    parts_col = shop_db.parts
+
+    query = {
+        "shop_id": shop["_id"],
+        "is_active": True,
+        "$or": [
+            {"part_number": {"$regex": starts, "$options": "i"}},
+            {"description": {"$regex": contains, "$options": "i"}},
+            {"reference": {"$regex": contains, "$options": "i"}},
+        ],
+    }
+
+    projection = {
+        "part_number": 1,
+        "description": 1,
+        "reference": 1,
+        "average_cost": 1,
+        "in_stock": 1,
+    }
+
+    # Sort: prefer part_number prefix matches first, then by part_number
+    # (Mongo can't sort by "prefix match" easily without $meta; we keep simple)
+    cursor = parts_col.find(query, projection).sort([("part_number", 1)]).limit(limit)
+
+    items = []
+    for p in cursor:
+        items.append({
+            "id": str(p.get("_id")),
+            "part_number": p.get("part_number") or "",
+            "description": p.get("description") or "",
+            "reference": p.get("reference") or "",
+            "average_cost": float(p.get("average_cost") or 0),
+            "in_stock": int(p.get("in_stock") or 0),
+        })
+
+    return jsonify({"items": items}), 200
