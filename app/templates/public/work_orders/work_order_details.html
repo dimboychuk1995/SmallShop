@@ -10,31 +10,23 @@
       <a class="btn btn-outline-secondary" href="{{ url_for('work_orders.work_orders_page') }}">Back</a>
     </div>
 
-    <!-- 1) Select Customer -->
-    <form method="get" action="{{ url_for('work_orders.work_order_details_page') }}" class="mb-4">
-      <div class="row g-3 align-items-end">
-        <div class="col-md-8">
-          <label class="form-label">Customer</label>
-          <select name="customer_id" class="form-select" required>
-            <option value="">-- Select customer --</option>
-            {% for c in customers %}
-              <option value="{{ c.id }}" {% if c.id == selected_customer_id %}selected{% endif %}>
-                {{ c.label }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="col-md-4">
-          <button class="btn btn-primary w-100" type="submit">Choose</button>
-        </div>
-      </div>
+    <!-- Customer (auto-submit) -->
+    <form method="get" action="{{ url_for('work_orders.work_order_details_page') }}" class="mb-3">
+      <label class="form-label">Customer</label>
+      <select name="customer_id" class="form-select" required onchange="this.form.submit()">
+        <option value="">-- Select customer --</option>
+        {% for c in customers %}
+          <option value="{{ c.id }}" {% if c.id == selected_customer_id %}selected{% endif %}>
+            {{ c.label }}
+          </option>
+        {% endfor %}
+      </select>
     </form>
 
     {% if selected_customer_id %}
 
-      <!-- 2) Select existing Unit (auto-submit on change) -->
-      <form method="get" action="{{ url_for('work_orders.work_order_details_page') }}" class="mb-3">
+      <!-- Unit (auto-submit) -->
+      <form method="get" action="{{ url_for('work_orders.work_order_details_page') }}" class="mb-4">
         <input type="hidden" name="customer_id" value="{{ selected_customer_id }}"/>
 
         <div class="row g-3 align-items-end">
@@ -48,12 +40,9 @@
                 </option>
               {% endfor %}
             </select>
-            <div class="form-text">
-              You can select an existing unit or create a new one.
-            </div>
           </div>
 
-          <div class="col-md-4 d-flex justify-content-end">
+          <div class="col-md-4">
             <button type="button" class="btn btn-success w-100"
                     data-bs-toggle="modal" data-bs-target="#createUnitModal">
               + Add Unit
@@ -62,15 +51,15 @@
         </div>
       </form>
 
-      <!-- 3) Create Unit (modal) -->
-      <div class="modal fade" id="createUnitModal" tabindex="-1" aria-labelledby="createUnitModalLabel" aria-hidden="true">
+      <!-- Create Unit modal -->
+      <div class="modal fade" id="createUnitModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
           <div class="modal-content">
             <form method="post" action="{{ url_for('work_orders.create_unit') }}">
               <input type="hidden" name="customer_id" value="{{ selected_customer_id }}"/>
 
               <div class="modal-header">
-                <h5 class="modal-title" id="createUnitModalLabel">Create New Unit</h5>
+                <h5 class="modal-title">Create New Unit</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
 
@@ -122,43 +111,99 @@
         </div>
       </div>
 
-      <!-- 4) Create Work Order -->
-      <form method="post" action="{{ url_for('work_orders.create_work_order') }}">
-        <input type="hidden" name="customer_id" value="{{ selected_customer_id }}"/>
-        <input type="hidden" name="unit_id" value="{{ selected_unit_id }}"/>
+      {% if selected_unit_id %}
 
-        <div class="d-flex justify-content-end">
-          <button class="btn btn-primary" type="submit" {% if not selected_unit_id %}disabled{% endif %}>
-            Create Work Order
-          </button>
-        </div>
+        <!-- Data for JS -->
+        <script type="application/json" id="laborRatesData">{{ labor_rates|tojson }}</script>
+        <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
 
-        {% if not selected_unit_id %}
-          <div class="form-text mt-2">
-            Select a unit (or create one) to enable work order creation.
+        <!-- Work order lines -->
+        <form method="post" action="{{ url_for('work_orders.preview_work_order') }}" class="mt-3">
+          <input type="hidden" name="customer_id" value="{{ selected_customer_id }}"/>
+          <input type="hidden" name="unit_id" value="{{ selected_unit_id }}"/>
+
+          <div class="d-flex flex-wrap gap-3 align-items-center mb-3 text-muted small">
+            <div>Labor total: <strong id="laborTotalDisplay">—</strong></div>
+            <div>Parts total: <strong id="partsTotalDisplay">—</strong></div>
+            <div>Grand total: <strong id="grandTotalDisplay">—</strong></div>
           </div>
-        {% endif %}
-      </form>
+
+          <div class="card border mb-3">
+            <div class="card-body">
+              <h2 class="h6 mb-3">Labor</h2>
+
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Labor Description</label>
+                  <input name="labor_description" class="form-control" maxlength="200" value="{{ labor_description }}">
+                </div>
+
+                <div class="col-md-2">
+                  <label class="form-label">Hours</label>
+                  <input id="labor_hours" name="labor_hours" class="form-control" inputmode="decimal" value="{{ labor_hours }}">
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label">Labor Rate</label>
+                  <select id="labor_rate_code" name="labor_rate_code" class="form-select">
+                    <option value="">-- Select rate --</option>
+                    {% for r in labor_rates %}
+                      <option value="{{ r.code }}" {% if r.code == labor_rate_code %}selected{% endif %}>
+                        {{ r.name }} (${{ "%.2f"|format(r.hourly_rate) }}/hr)
+                      </option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="card border">
+            <div class="card-body">
+              <h2 class="h6 mb-3">Parts</h2>
+
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:18%;">Part Number</th>
+                      <th>Description</th>
+                      <th style="width:10%;">Count</th>
+                      <th style="width:14%;">Cost</th>
+                      <th style="width:14%;">Price</th>
+                      <th style="width:14%;">Line Total</th>
+                    </tr>
+                  </thead>
+                  <tbody id="partsTbody">
+                    {# JS will create rows here #}
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="mt-3 d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" type="submit" name="action" value="recalc">
+                  Save Draft
+                </button>
+                <button class="btn btn-primary" type="submit" name="action" value="create">
+                  Create Work Order
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </form>
+
+        <script src="{{ url_for('static', filename='js/work_order_details.js') }}"></script>
+
+      {% else %}
+        <div class="alert alert-info mb-0">Select a unit (or create one) to continue.</div>
+      {% endif %}
 
     {% else %}
-      <div class="alert alert-info mb-0">
-        Select a customer to continue.
-      </div>
+      <div class="alert alert-info mb-0">Select a customer to continue.</div>
     {% endif %}
 
   </div>
 </div>
-
-{% if auto_open_unit_modal %}
-<script>
-  document.addEventListener("DOMContentLoaded", function () {
-    var el = document.getElementById("createUnitModal");
-    if (!el || !window.bootstrap) return;
-
-    var modal = window.bootstrap.Modal.getOrCreateInstance(el);
-    modal.show();
-  });
-</script>
-{% endif %}
-
 {% endblock %}
