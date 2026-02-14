@@ -164,12 +164,62 @@ def seed_parts_categories(shop_db, shop_id: ObjectId):
         )
 
 
+# -----------------------------
+# NEW: labor rates seeding (shop DB)
+# -----------------------------
+
+DEFAULT_LABOR_RATES = [
+    {"code": "standard", "name": "Standard", "hourly_rate": 100.0},
+    {"code": "after_hours", "name": "After Hours", "hourly_rate": 150.0},
+]
+
+
+def seed_labor_rates(shop_db, shop_id: ObjectId):
+    """
+    Ensure default labor rates exist in shop DB (idempotent, per shop).
+    Collection: labor_rates
+    """
+    if shop_db is None or shop_id is None:
+        return
+
+    col = shop_db.labor_rates
+
+    # Prevent duplicates per shop
+    try:
+        col.create_index([("shop_id", 1), ("code", 1)], unique=True, name="uniq_labor_rates_shop_code")
+    except Exception:
+        pass
+
+    now = utcnow()
+
+    for item in DEFAULT_LABOR_RATES:
+        code = item["code"]
+        col.update_one(
+            {"shop_id": shop_id, "code": code},
+            {
+                "$setOnInsert": {
+                    "shop_id": shop_id,
+                    "code": code,
+                    "name": item.get("name") or code,
+                    "hourly_rate": float(item.get("hourly_rate") or 0),
+                    "is_active": True,
+                    "created_at": now,
+                },
+                "$set": {
+                    "updated_at": now,
+                }
+            },
+            upsert=True,
+        )
+
+
 def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     """
     Creates shop DB and seeds minimal defaults:
     - settings (idempotent upsert)
     - default parts categories (idempotent)
     - default parts pricing rules (margin/markup ranges) (idempotent)
+    - default labor rates (idempotent)   <-- NEW
     """
     client = get_mongo_client()
     sdb = client[shop_db_name]
@@ -234,7 +284,7 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
         pass
 
     # -----------------------------
-    # seed default parts pricing rules (NEW)
+    # seed default parts pricing rules
     # -----------------------------
     col = sdb.parts_pricing_rules
 
@@ -268,6 +318,13 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
         upsert=True
     )
 
+    # -----------------------------
+    # seed default labor rates (NEW)
+    # -----------------------------
+    try:
+        seed_labor_rates(sdb, shop_oid)
+    except Exception:
+        pass
 
 
 @tenant_bp.post("/register")
@@ -350,7 +407,7 @@ def register_tenant():
         shop_res = master.shops.insert_one(shop_doc)
         shop_id = shop_res.inserted_id
 
-        # ✅ IMPORTANT: нужен shop_id для seed parts_categories
+        # ✅ IMPORTANT: нужен shop_id для seed parts_categories / labor_rates
         shop_doc["_id"] = shop_id
 
         # ✅ user has ONLY shop_ids; NO shop_id field
@@ -373,7 +430,7 @@ def register_tenant():
         init_tenant_database(tenant_db_name, tenant_doc)
         created_tenant_db = True
 
-        # Create shop DB (will seed parts_categories)
+        # Create shop DB (will seed parts_categories + pricing rules + labor rates)
         init_shop_database(shop_db_name, tenant_doc, shop_doc)
         created_shop_db = True
 
