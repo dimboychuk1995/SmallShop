@@ -205,7 +205,7 @@
     if (cnt) cnt.textContent = String(blocks.length);
 
     // enable/disable remove buttons
-    blocks.forEach((b, idx) => {
+    blocks.forEach((b) => {
       const btn = b.querySelector(".removeBlockBtn");
       if (!btn) return;
       btn.disabled = blocks.length <= 1;
@@ -324,7 +324,7 @@
   }, 150);
 
   // ---------------- blocks add/remove ----------------
-  function renumberBlock(blockEl, idx, laborRates) {
+  function renumberBlock(blockEl, idx) {
     blockEl.dataset.blockIndex = String(idx);
     blockEl.querySelector(".block-number").textContent = String(idx + 1);
 
@@ -345,7 +345,7 @@
     });
   }
 
-  function cloneBlock(blocksContainer, laborRates) {
+  function cloneBlock(blocksContainer) {
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
     const last = blocks[blocks.length - 1];
     const clone = last.cloneNode(true);
@@ -391,10 +391,36 @@
       blockEl.remove();
 
       // renumber blocks and parts names
-      Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx, laborRates));
+      Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
 
       recalcAll(blocksContainer, pricing, laborRates);
     });
+  }
+
+  // ---------------- customer/unit (NO reload, KEEP blocks) ----------------
+  function setSelectOptions(selectEl, items, placeholder) {
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = placeholder || "-- Select --";
+    selectEl.appendChild(ph);
+
+    (items || []).forEach(it => {
+      const opt = document.createElement("option");
+      opt.value = String(it.id || "");
+      opt.textContent = String(it.label || "");
+      selectEl.appendChild(opt);
+    });
+  }
+
+  async function fetchUnits(customerId) {
+    const url = `/work_orders/api/units?customer_id=${encodeURIComponent(customerId)}`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.items) ? data.items : [];
   }
 
   // ---------------- init ----------------
@@ -405,7 +431,55 @@
     const blocksContainer = $("blocksContainer");
     if (!blocksContainer) return;
 
-    // dropdown
+    const customerSel = $("customerSelect");
+    const unitSel = $("unitSelect");
+    const editor = $("workOrderEditor");
+    const hint = $("selectHint");
+
+    const customerHidden = $("selectedCustomerHidden");
+    const unitHidden = $("selectedUnitHidden");
+    const createUnitCustomerHidden = $("createUnitCustomerHidden");
+
+    function setEditorEnabled(enabled) {
+      if (editor) editor.disabled = !enabled;
+      if (hint) hint.style.display = enabled ? "none" : "";
+    }
+
+    // initial enable state
+    setEditorEnabled(!!(unitSel && String(unitSel.value || "").trim()));
+
+    // customer change: update hidden customer, refresh units list, disable editor until unit picked
+    customerSel?.addEventListener("change", async function () {
+      const customerId = String(customerSel.value || "").trim();
+
+      if (customerHidden) customerHidden.value = customerId;
+      if (createUnitCustomerHidden) createUnitCustomerHidden.value = customerId;
+
+      // reset unit selection (BUT KEEP blocks content as-is)
+      if (unitHidden) unitHidden.value = "";
+      if (unitSel) {
+        unitSel.disabled = !customerId;
+        setSelectOptions(unitSel, [], customerId ? "Loading…" : "-- Select unit --");
+        unitSel.value = "";
+      }
+
+      setEditorEnabled(false);
+
+      if (!customerId || !unitSel) return;
+
+      const units = await fetchUnits(customerId);
+      setSelectOptions(unitSel, units, "-- Select unit --");
+      unitSel.disabled = false;
+    });
+
+    // unit change: just update hidden unit; enable editor (KEEP blocks)
+    unitSel?.addEventListener("change", function () {
+      const unitId = String(unitSel.value || "").trim();
+      if (unitHidden) unitHidden.value = unitId;
+      setEditorEnabled(!!unitId);
+    });
+
+    // ---------------- dropdown ----------------
     const dd = ensureDropdown();
 
     dd.addEventListener("mousedown", function (e) {
@@ -454,10 +528,10 @@
     // add block button
     const addBtn = $("addBlockBtn");
     addBtn?.addEventListener("click", function () {
-      cloneBlock(blocksContainer, laborRates);
+      cloneBlock(blocksContainer);
 
       // renumber all blocks and their input names
-      Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx, laborRates));
+      Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
 
       recalcAll(blocksContainer, pricing, laborRates);
     });
@@ -465,7 +539,7 @@
     wireBlockEvents(blocksContainer, pricing, laborRates);
 
     // initial ensure rows/totals
-    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx, laborRates));
+    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
     recalcAll(blocksContainer, pricing, laborRates);
   });
 })();

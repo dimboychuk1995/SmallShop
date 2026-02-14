@@ -356,3 +356,55 @@ def api_parts_search():
         })
 
     return jsonify({"items": items}), 200
+
+
+@work_orders_bp.get("/work_orders/api/units")
+@login_required
+@permission_required("work_orders.create")
+def api_units_for_customer():
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"items": [], "error": "shop_db_missing"}), 200
+
+    customer_id = oid(request.args.get("customer_id"))
+    if not customer_id:
+        return jsonify({"items": []}), 200
+
+    rows = list(
+        shop_db.units.find({"customer_id": customer_id, "is_active": True})
+        .sort([("created_at", -1)])
+        .limit(500)
+    )
+
+    items = [{"id": str(u["_id"]), "label": unit_label(u)} for u in rows]
+    return jsonify({"items": items}), 200
+
+
+@work_orders_bp.get("/work_orders/api/unit")
+@login_required
+@permission_required("work_orders.create")
+def api_unit_details():
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "item": None, "error": "shop_db_missing"}), 200
+
+    unit_id = oid(request.args.get("id"))
+    if not unit_id:
+        return jsonify({"ok": False, "item": None}), 200
+
+    u = shop_db.units.find_one({"_id": unit_id, "is_active": True})
+    if not u:
+        return jsonify({"ok": False, "item": None}), 200
+
+    item = {
+        "id": str(u.get("_id")),
+        "customer_id": str(u.get("customer_id")) if u.get("customer_id") else "",
+        "vin": u.get("vin") or "",
+        "unit_number": u.get("unit_number") or "",
+        "make": u.get("make") or "",
+        "model": u.get("model") or "",
+        "year": u.get("year") or "",
+        "type": u.get("type") or "",
+        "mileage": u.get("mileage") or "",
+    }
+    return jsonify({"ok": True, "item": item}), 200
