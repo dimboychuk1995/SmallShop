@@ -112,11 +112,13 @@
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
 
     <!-- Work Order editor -->
-    <form method="post" action="{{ url_for('work_orders.preview_work_order') }}" class="mt-3">
+    <form id="workOrderForm" method="post" action="{{ url_for('work_orders.preview_work_order') }}" class="mt-3">
+
 
       <!-- hidden ids that JS updates (important) -->
       <input type="hidden" id="selectedCustomerHidden" name="customer_id" value="{{ selected_customer_id or '' }}"/>
       <input type="hidden" id="selectedUnitHidden" name="unit_id" value="{{ selected_unit_id or '' }}"/>
+      <input type="hidden" name="action" id="actionHidden" value="recalc">
 
       <!-- info -->
       <div id="selectHint" class="alert alert-info mb-3" {% if selected_unit_id %}style="display:none;"{% endif %}>
@@ -218,8 +220,8 @@
         </div>
 
         <div class="mt-3 d-flex justify-content-end gap-2">
-          <button class="btn btn-outline-secondary" type="submit" name="action" value="recalc">Save Draft</button>
-          <button class="btn btn-primary" type="submit" name="action" value="create">Create Work Order</button>
+          <button id="saveDraftBtn" class="btn btn-outline-secondary" type="button">Save Draft</button>
+          <button id="createWorkOrderBtn" class="btn btn-primary" type="button">Create Work Order</button>
         </div>
 
       </fieldset>

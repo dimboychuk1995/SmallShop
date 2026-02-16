@@ -269,16 +269,120 @@ def preview_work_order():
         flash("Shop database not configured.", "error")
         return redirect(url_for("main.dashboard"))
 
+    action = (request.form.get("action") or "recalc").strip().lower()
+
     customer_id = oid(request.form.get("customer_id"))
     unit_id = oid(request.form.get("unit_id"))
 
-    form_state = {
-        "labor_description": (request.form.get("labor_description") or "").strip(),
-        "labor_hours": (request.form.get("labor_hours") or "").strip(),
-        "labor_rate_code": (request.form.get("labor_rate_code") or "").strip(),
-    }
+    if not customer_id:
+        flash("Customer is required.", "error")
+        return redirect(url_for("work_orders.work_order_details_page"))
 
-    return render_details(shop_db, shop, customer_id, unit_id, form_state=form_state)
+    if not unit_id:
+        flash("Unit is required.", "error")
+        return redirect(url_for("work_orders.work_order_details_page", customer_id=str(customer_id)))
+
+    # ---- parse blocks ----
+    # inputs come like:
+    # blocks[0][labor_description], blocks[0][labor_hours], blocks[0][labor_rate_code]
+    # blocks[0][parts][0][part_number] ... etc
+    import re
+
+    blocks_map: dict[int, dict] = {}
+
+    # labor
+    labor_re = re.compile(r"^blocks\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
+    # parts
+    parts_re = re.compile(r"^blocks\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost)\]$")
+
+    for key, val in request.form.items():
+        m = labor_re.match(key)
+        if m:
+            bidx = int(m.group(1))
+            field = m.group(2)
+            b = blocks_map.setdefault(bidx, {"labor": {}, "parts": []})
+
+            if field == "labor_description":
+                b["labor"]["description"] = (val or "").strip()
+            elif field == "labor_hours":
+                b["labor"]["hours"] = (val or "").strip()
+            elif field == "labor_rate_code":
+                b["labor"]["rate_code"] = (val or "").strip()
+            continue
+
+        m = parts_re.match(key)
+        if m:
+            bidx = int(m.group(1))
+            ridx = int(m.group(2))
+            field = m.group(3)
+
+            b = blocks_map.setdefault(bidx, {"labor": {}, "parts": []})
+            while len(b["parts"]) <= ridx:
+                b["parts"].append({})
+
+            if field in ("part_number", "description"):
+                b["parts"][ridx][field] = (val or "").strip()
+            elif field == "qty":
+                b["parts"][ridx]["qty"] = (val or "").strip()
+            elif field == "cost":
+                b["parts"][ridx]["cost"] = (val or "").strip()
+            continue
+
+    # normalize blocks list in order
+    blocks = []
+    for bidx in sorted(blocks_map.keys()):
+        b = blocks_map[bidx]
+
+        # drop empty trailing part rows
+        parts_clean = []
+        for p in (b.get("parts") or []):
+            pn = (p.get("part_number") or "").strip()
+            ds = (p.get("description") or "").strip()
+            qty = (p.get("qty") or "").strip()
+            cost = (p.get("cost") or "").strip()
+            if not (pn or ds or qty or cost):
+                continue
+            parts_clean.append({
+                "part_number": pn,
+                "description": ds,
+                "qty": qty,
+                "cost": cost,
+            })
+
+        labor = b.get("labor") or {}
+        blocks.append({
+            "labor": {
+                "description": (labor.get("description") or "").strip(),
+                "hours": (labor.get("hours") or "").strip(),
+                "rate_code": (labor.get("rate_code") or "").strip(),
+            },
+            "parts": parts_clean,
+        })
+
+    now = utcnow()
+    user_id = current_user_id()
+
+    if action == "create":
+        doc = {
+            "shop_id": shop["_id"],
+            "tenant_id": shop.get("tenant_id"),
+            "customer_id": customer_id,
+            "unit_id": unit_id,
+            "status": "open",
+            "blocks": blocks,
+            "is_active": True,
+            "created_at": now,
+            "updated_at": now,
+            "created_by": user_id,
+            "updated_by": user_id,
+        }
+
+        res = shop_db.work_orders.insert_one(doc)
+        flash("Work order created.", "success")
+        return redirect(url_for("work_orders.work_orders_page"))
+
+    # recalc/preview: just re-render (for now)
+    return render_details(shop_db, shop, customer_id, unit_id)
 
 
 # -----------------------------

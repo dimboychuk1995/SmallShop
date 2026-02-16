@@ -439,6 +439,53 @@
     const customerHidden = $("selectedCustomerHidden");
     const unitHidden = $("selectedUnitHidden");
     const createUnitCustomerHidden = $("createUnitCustomerHidden");
+        // --------- create/save submit ----------
+    const woForm = $("workOrderForm");
+    const actionHidden = $("actionHidden"); // <input type="hidden" name="action" id="actionHidden">
+    const saveBtn = $("saveDraftBtn");      // button
+    const createBtn = $("createWorkOrderBtn"); // button
+    const addBlockBtn = $("addBlockBtn");
+    const addUnitBtn = $("addUnitBtn");
+
+    function lockUiCreating() {
+      // ВАЖНО: НЕ editor.disabled (иначе браузер не отправит поля)
+      if (editor) {
+        editor.style.pointerEvents = "none";
+        editor.style.opacity = "0.75";
+      }
+
+      if (customerSel) customerSel.disabled = true;
+      if (unitSel) unitSel.disabled = true;
+      if (addUnitBtn) addUnitBtn.disabled = true;
+
+      if (addBlockBtn) addBlockBtn.disabled = true;
+      document.querySelectorAll(".removeBlockBtn").forEach(b => { b.disabled = true; });
+
+      if (saveBtn) saveBtn.disabled = true;
+
+      if (createBtn) {
+        createBtn.disabled = true;
+        createBtn.textContent = "Creating…";
+      }
+    }
+
+    function submitWithAction(action) {
+      if (!woForm) return;
+
+      if (actionHidden) actionHidden.value = action;
+
+      // submit with HTML validation
+      if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
+      else woForm.submit();
+
+      if (action === "create") {
+        // блокируем UI уже после старта отправки
+        setTimeout(lockUiCreating, 0);
+      }
+    }
+
+    saveBtn?.addEventListener("click", () => submitWithAction("recalc"));
+    createBtn?.addEventListener("click", () => submitWithAction("create"));
 
     function setEditorEnabled(enabled) {
       if (editor) editor.disabled = !enabled;
