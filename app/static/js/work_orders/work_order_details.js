@@ -18,6 +18,13 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  function parseMoneyText(v) {
+    if (v === null || v === undefined) return 0;
+    const s = String(v).replace(/[^0-9.-]/g, "").trim();
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+
   function money(n) { return Number.isFinite(n) ? n.toFixed(2) : ""; }
   function round2(n) { return Math.round(n * 100) / 100; }
 
@@ -214,6 +221,60 @@
       if (!btn) return;
       btn.disabled = blocks.length <= 1;
     });
+  }
+
+  // ---------------- totals serialization (FRONT -> BACK) ----------------
+  function serializeTotals(blocksContainer) {
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const outBlocks = [];
+
+    let laborSum = 0;
+    let partsSum = 0;
+    let grandSum = 0;
+
+    blocks.forEach((bEl) => {
+      const laborText = bEl.querySelector(".laborTotalDisplay")?.textContent || "0";
+      const partsText = bEl.querySelector(".partsTotalDisplay")?.textContent || "0";
+      const blockText = bEl.querySelector(".blockTotalDisplay")?.textContent || "0";
+
+      const laborTotal = round2(parseMoneyText(laborText));
+      const partsTotal = round2(parseMoneyText(partsText));
+      const blockTotal = round2(parseMoneyText(blockText));
+
+      laborSum += laborTotal;
+      partsSum += partsTotal;
+      grandSum += blockTotal;
+
+      outBlocks.push({
+        labor_total: laborTotal,
+        parts_total: partsTotal,
+        block_total: blockTotal,
+      });
+    });
+
+    // grand_total берём из UI, но если там "—" / пусто — пересчитаем из блоков
+    const grandText = $("grandTotalDisplay")?.textContent || "";
+    const grandUi = round2(parseMoneyText(grandText));
+    const grandFinal = grandUi > 0 ? grandUi : round2(grandSum);
+
+    return {
+      labor_total: round2(laborSum),
+      parts_total: round2(partsSum),
+      grand_total: grandFinal,
+      blocks: outBlocks,
+    };
+  }
+
+  function upsertHiddenJsonInput(formEl, name, obj) {
+    if (!formEl) return;
+    let input = formEl.querySelector(`input[name="${CSS.escape(name)}"]`);
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      formEl.appendChild(input);
+    }
+    input.value = JSON.stringify(obj || {});
   }
 
   // ---------------- backend search dropdown ----------------
@@ -541,7 +602,7 @@
     if (isEditing) {
       editor.style.pointerEvents = "";
       editor.style.opacity = "";
-      // customer/unit НЕ даём менять уже созданный ордер (обычно так правильно)
+      // customer/unit НЕ даём менять уже созданный ордер
       if (customerSel) customerSel.disabled = true;
       if (unitSel) unitSel.disabled = true;
       if (addUnitBtn) addUnitBtn.disabled = true;
@@ -646,6 +707,10 @@
       if (!woForm) return;
       if (actionHidden) actionHidden.value = action;
 
+      // ✅ перед отправкой формы на create/recalc кладём totals_json
+      const totals = serializeTotals(blocksContainer);
+      upsertHiddenJsonInput(woForm, "totals_json", totals);
+
       if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
       else woForm.submit();
 
@@ -718,26 +783,27 @@
     document.addEventListener("click", function (e) {
       if (dd.style.display === "none") return;
       if (e.target.closest("#partsSearchDropdown")) return;
-      if (e.target.closest(".part-number") || e.target.closest(".part-description")) return;
       hideDropdown(dd);
     });
 
-    window.addEventListener("scroll", () => { if (dd.style.display !== "none") hideDropdown(dd); }, true);
-    window.addEventListener("resize", () => { if (dd.style.display !== "none") hideDropdown(dd); });
+    document.addEventListener("scroll", function () {
+      if (dd.style.display !== "none") hideDropdown(dd);
+    }, { passive: true });
 
+    // bind search on inputs (part-number / part-description)
     blocksContainer.addEventListener("focusin", function (e) {
-      const inputEl = e.target;
-      if (!(inputEl instanceof HTMLInputElement)) return;
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) return;
 
-      if (!(inputEl.classList.contains("part-number") || inputEl.classList.contains("part-description"))) return;
+      if (!(target.classList.contains("part-number") || target.classList.contains("part-description"))) return;
 
-      const tr = inputEl.closest("tr.parts-row");
-      const blockEl = inputEl.closest(".wo-block");
+      const tr = target.closest("tr.parts-row");
+      const blockEl = target.closest(".wo-block");
       if (!tr || !blockEl) return;
 
-      inputEl.addEventListener("input", () => debouncedSearch(dd, inputEl, tr, blockEl));
-      inputEl.addEventListener("focus", () => debouncedSearch(dd, inputEl, tr, blockEl));
-      debouncedSearch(dd, inputEl, tr, blockEl);
+      target.addEventListener("input", () => debouncedSearch(dd, target, tr, blockEl));
+      target.addEventListener("focus", () => debouncedSearch(dd, target, tr, blockEl));
+      debouncedSearch(dd, target, tr, blockEl);
     }, { passive: true });
 
     addBlockBtn?.addEventListener("click", function () {
@@ -793,13 +859,18 @@
       setButtonsState("editing_open", els);
     });
 
-    // save -> API update blocks
+    // save -> API update blocks + totals
     saveBtn?.addEventListener("click", async function () {
       if (!isCreated || !workOrderId) return;
 
       try {
         const blocks = serializeBlocks(blocksContainer);
-        await apiPostJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/update`, { blocks });
+        const totals = serializeTotals(blocksContainer);
+
+        await apiPostJson(
+          `/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/update`,
+          { blocks, totals }
+        );
 
         // после сохранения снова лочим
         setEditingMode(false, els);

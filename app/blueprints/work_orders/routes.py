@@ -296,6 +296,7 @@ def preview_work_order():
     # blocks[0][labor_description], blocks[0][labor_hours], blocks[0][labor_rate_code]
     # blocks[0][parts][0][part_number] ... etc
     import re
+    import json
 
     blocks_map: dict[int, dict] = {}
 
@@ -368,6 +369,17 @@ def preview_work_order():
             "parts": parts_clean,
         })
 
+    # ✅ totals from front (we just store)
+    totals = {}
+    totals_raw = (request.form.get("totals_json") or "").strip()
+    if totals_raw:
+        try:
+            totals = json.loads(totals_raw)
+            if not isinstance(totals, dict):
+                totals = {}
+        except Exception:
+            totals = {}
+
     now = utcnow()
     user_id = current_user_id()
 
@@ -379,6 +391,10 @@ def preview_work_order():
             "unit_id": unit_id,
             "status": "open",
             "blocks": blocks,
+
+            # ✅ store totals from UI
+            "totals": totals,
+
             "is_active": True,
             "created_at": now,
             "updated_at": now,
@@ -389,8 +405,6 @@ def preview_work_order():
         res = shop_db.work_orders.insert_one(doc)
         flash("Work order created.", "success")
 
-        # ВАЖНО: НЕ редиректим на work_orders_page
-        # Возвращаем ту же страницу + флаг для лока UI
         return render_details(
             shop_db,
             shop,
@@ -555,9 +569,13 @@ def api_work_order_update(work_order_id):
 
     data = request.get_json(silent=True) or {}
     blocks = data.get("blocks")
+    totals = data.get("totals") or {}
 
     if not isinstance(blocks, list):
         return jsonify({"ok": False, "error": "blocks_required"}), 200
+
+    if totals is not None and not isinstance(totals, dict):
+        totals = {}
 
     # (опционально) можно запретить редактирование, если paid
     if (wo.get("status") or "open") == "paid":
@@ -571,6 +589,7 @@ def api_work_order_update(work_order_id):
         {
             "$set": {
                 "blocks": blocks,
+                "totals": totals,  # ✅ сохраняем totals от фронта
                 "updated_at": now,
                 "updated_by": user_id,
             }
@@ -578,6 +597,8 @@ def api_work_order_update(work_order_id):
     )
 
     return jsonify({"ok": True}), 200
+
+
 
 @work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/status")
 @login_required
