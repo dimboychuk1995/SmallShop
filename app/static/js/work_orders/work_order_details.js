@@ -204,7 +204,6 @@
     const cnt = $("blockCount");
     if (cnt) cnt.textContent = String(blocks.length);
 
-    // enable/disable remove buttons
     blocks.forEach((b) => {
       const btn = b.querySelector(".removeBlockBtn");
       if (!btn) return;
@@ -328,12 +327,10 @@
     blockEl.dataset.blockIndex = String(idx);
     blockEl.querySelector(".block-number").textContent = String(idx + 1);
 
-    // labor names
     blockEl.querySelector(".labor-description").name = `blocks[${idx}][labor_description]`;
     blockEl.querySelector(".labor-hours").name = `blocks[${idx}][labor_hours]`;
     blockEl.querySelector(".labor-rate").name = `blocks[${idx}][labor_rate_code]`;
 
-    // parts names
     const tbody = blockEl.querySelector(".partsTbody");
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
     rows.forEach((tr, rIdx) => {
@@ -350,7 +347,6 @@
     const last = blocks[blocks.length - 1];
     const clone = last.cloneNode(true);
 
-    // wipe values
     clone.querySelectorAll("input").forEach(i => {
       if (i.classList.contains("part-price")) return;
       i.value = "";
@@ -358,7 +354,6 @@
     clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
     clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .blockTotalDisplay").forEach(el => el.textContent = "—");
 
-    // reset parts table to single row
     const tbody = clone.querySelector(".partsTbody");
     tbody.innerHTML = "";
     tbody.appendChild(makePartsRow(blocks.length, 0));
@@ -368,7 +363,6 @@
   }
 
   function wireBlockEvents(blocksContainer, pricing, laborRates) {
-    // One handler for all inputs
     blocksContainer.addEventListener("input", function (e) {
       const t = e.target;
       if (!t) return;
@@ -377,7 +371,6 @@
       recalcAll(blocksContainer, pricing, laborRates);
     });
 
-    // remove block
     blocksContainer.addEventListener("click", function (e) {
       const btn = e.target.closest(".removeBlockBtn");
       if (!btn) return;
@@ -390,9 +383,7 @@
 
       blockEl.remove();
 
-      // renumber blocks and parts names
       Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
-
       recalcAll(blocksContainer, pricing, laborRates);
     });
   }
@@ -423,6 +414,71 @@
     return Array.isArray(data.items) ? data.items : [];
   }
 
+  // ---------------- restore draft (NEW) ----------------
+  function ensureBlocksCount(blocksContainer, desiredCount) {
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    while (blocks.length < desiredCount) {
+      cloneBlock(blocksContainer);
+      blocks.push(blocksContainer.querySelectorAll(".wo-block")[blocks.length]);
+    }
+    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+  }
+
+  function applyDraftToUi(blocksContainer, draftBlocks) {
+    if (!Array.isArray(draftBlocks) || draftBlocks.length === 0) return;
+
+    ensureBlocksCount(blocksContainer, draftBlocks.length);
+
+    const blockEls = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+
+    draftBlocks.forEach((b, bIdx) => {
+      const el = blockEls[bIdx];
+      if (!el) return;
+
+      // labor
+      const ld = el.querySelector(".labor-description");
+      const lh = el.querySelector(".labor-hours");
+      const lr = el.querySelector(".labor-rate");
+
+      // поддержка двух форматов:
+      // 1) b = { labor_description, labor_hours, labor_rate_code, parts: [...] }
+      // 2) b = { labor: {description, hours, rate_code}, parts: [...] }
+      const laborDesc = (b?.labor?.description ?? b?.labor_description ?? "");
+      const laborHours = (b?.labor?.hours ?? b?.labor_hours ?? "");
+      const laborRate = (b?.labor?.rate_code ?? b?.labor_rate_code ?? "");
+
+      if (ld) ld.value = String(laborDesc ?? "");
+      if (lh) lh.value = String(laborHours ?? "");
+      if (lr) lr.value = String(laborRate ?? "");
+
+      // parts
+      const tbody = el.querySelector(".partsTbody");
+      if (!tbody) return;
+
+      tbody.innerHTML = "";
+
+      const parts = Array.isArray(b?.parts) ? b.parts : [];
+      if (parts.length === 0) {
+        tbody.appendChild(makePartsRow(bIdx, 0));
+        return;
+      }
+
+      parts.forEach((p, rIdx) => {
+        const tr = makePartsRow(bIdx, rIdx);
+        tr.querySelector(".part-number").value = String(p?.part_number ?? "");
+        tr.querySelector(".part-description").value = String(p?.description ?? "");
+        tr.querySelector(".part-qty").value = String(p?.qty ?? "");
+        tr.querySelector(".part-cost").value = String(p?.cost ?? "");
+        tbody.appendChild(tr);
+      });
+
+      // trailing empty row
+      tbody.appendChild(makePartsRow(bIdx, parts.length));
+    });
+
+    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+  }
+
   // ---------------- init ----------------
   document.addEventListener("DOMContentLoaded", function () {
     const laborRates = readJsonScript("laborRatesData", []);
@@ -439,21 +495,19 @@
     const customerHidden = $("selectedCustomerHidden");
     const unitHidden = $("selectedUnitHidden");
     const createUnitCustomerHidden = $("createUnitCustomerHidden");
-        // --------- create/save submit ----------
+
     const woForm = $("workOrderForm");
-    const actionHidden = $("actionHidden"); // <input type="hidden" name="action" id="actionHidden">
-    const saveBtn = $("saveDraftBtn");      // button
-    const createBtn = $("createWorkOrderBtn"); // button
+    const actionHidden = $("actionHidden");
+    const saveBtn = $("saveDraftBtn");
+    const createBtn = $("createWorkOrderBtn");
     const addBlockBtn = $("addBlockBtn");
     const addUnitBtn = $("addUnitBtn");
 
     function lockUiCreating() {
-      // ВАЖНО: НЕ editor.disabled (иначе браузер не отправит поля)
       if (editor) {
         editor.style.pointerEvents = "none";
         editor.style.opacity = "0.75";
       }
-
       if (customerSel) customerSel.disabled = true;
       if (unitSel) unitSel.disabled = true;
       if (addUnitBtn) addUnitBtn.disabled = true;
@@ -474,14 +528,10 @@
 
       if (actionHidden) actionHidden.value = action;
 
-      // submit with HTML validation
       if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
       else woForm.submit();
 
-      if (action === "create") {
-        // блокируем UI уже после старта отправки
-        setTimeout(lockUiCreating, 0);
-      }
+      if (action === "create") setTimeout(lockUiCreating, 0);
     }
 
     saveBtn?.addEventListener("click", () => submitWithAction("recalc"));
@@ -492,17 +542,32 @@
       if (hint) hint.style.display = enabled ? "none" : "";
     }
 
+    // ---------- restore draft FIRST (NEW) ----------
+    const draftBlocks = readJsonScript("workOrderDraftData", []);
+    applyDraftToUi(blocksContainer, draftBlocks);
+
+    // wire + initial totals
+    wireBlockEvents(blocksContainer, pricing, laborRates);
+    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+    recalcAll(blocksContainer, pricing, laborRates);
+
     // initial enable state
     setEditorEnabled(!!(unitSel && String(unitSel.value || "").trim()));
 
-    // customer change: update hidden customer, refresh units list, disable editor until unit picked
+    // ---------- lock if created (AFTER restore) ----------
+    const createdInfo = readJsonScript("workOrderCreatedData", { created: false, id: "" });
+    if (createdInfo && createdInfo.created) {
+      lockUiCreating();
+      if (createBtn) createBtn.textContent = createdInfo.id ? `Created (#${createdInfo.id})` : "Created";
+    }
+
+    // customer change
     customerSel?.addEventListener("change", async function () {
       const customerId = String(customerSel.value || "").trim();
 
       if (customerHidden) customerHidden.value = customerId;
       if (createUnitCustomerHidden) createUnitCustomerHidden.value = customerId;
 
-      // reset unit selection (BUT KEEP blocks content as-is)
       if (unitHidden) unitHidden.value = "";
       if (unitSel) {
         unitSel.disabled = !customerId;
@@ -519,14 +584,14 @@
       unitSel.disabled = false;
     });
 
-    // unit change: just update hidden unit; enable editor (KEEP blocks)
+    // unit change
     unitSel?.addEventListener("change", function () {
       const unitId = String(unitSel.value || "").trim();
       if (unitHidden) unitHidden.value = unitId;
       setEditorEnabled(!!unitId);
     });
 
-    // ---------------- dropdown ----------------
+    // dropdown
     const dd = ensureDropdown();
 
     dd.addEventListener("mousedown", function (e) {
@@ -555,7 +620,7 @@
     window.addEventListener("scroll", () => { if (dd.style.display !== "none") hideDropdown(dd); }, true);
     window.addEventListener("resize", () => { if (dd.style.display !== "none") hideDropdown(dd); });
 
-    // wire search on focusin (event delegation, works for new rows/blocks)
+    // search wiring for part-number / part-description
     blocksContainer.addEventListener("focusin", function (e) {
       const inputEl = e.target;
       if (!(inputEl instanceof HTMLInputElement)) return;
@@ -572,21 +637,11 @@
       debouncedSearch(dd, inputEl, tr, blockEl);
     }, { passive: true });
 
-    // add block button
-    const addBtn = $("addBlockBtn");
-    addBtn?.addEventListener("click", function () {
+    // add block
+    addBlockBtn?.addEventListener("click", function () {
       cloneBlock(blocksContainer);
-
-      // renumber all blocks and their input names
       Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
-
       recalcAll(blocksContainer, pricing, laborRates);
     });
-
-    wireBlockEvents(blocksContainer, pricing, laborRates);
-
-    // initial ensure rows/totals
-    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
-    recalcAll(blocksContainer, pricing, laborRates);
   });
 })();

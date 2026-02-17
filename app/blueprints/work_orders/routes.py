@@ -183,9 +183,17 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "selected_unit_id": str(unit_id) if unit_id else "",
         "labor_rates": get_labor_rates(shop_db, shop["_id"]),
         "parts_pricing_rules": get_pricing_rules_json(shop_db, shop["_id"]),
+
+        # старые поля (оставляем как у тебя было)
         "labor_description": (form_state or {}).get("labor_description") or "",
         "labor_hours": (form_state or {}).get("labor_hours") or "",
         "labor_rate_code": (form_state or {}).get("labor_rate_code") or "",
+
+        # NEW: флаг, чтобы после create UI стал неактивным
+        "work_order_created": bool((form_state or {}).get("work_order_created")),
+        "created_work_order_id": (form_state or {}).get("created_work_order_id") or "",
+
+        "draft_blocks": (form_state or {}).get("draft_blocks") or [],
     }
 
     return _render_app_page("public/work_orders/work_order_details.html", **ctx)
@@ -379,7 +387,20 @@ def preview_work_order():
 
         res = shop_db.work_orders.insert_one(doc)
         flash("Work order created.", "success")
-        return redirect(url_for("work_orders.work_orders_page"))
+
+        # ВАЖНО: НЕ редиректим на work_orders_page
+        # Возвращаем ту же страницу + флаг для лока UI
+        return render_details(
+            shop_db,
+            shop,
+            customer_id,
+            unit_id,
+            form_state={
+                "work_order_created": True,
+                "created_work_order_id": str(res.inserted_id),
+                "draft_blocks": blocks,
+            },
+        )
 
     # recalc/preview: just re-render (for now)
     return render_details(shop_db, shop, customer_id, unit_id)
