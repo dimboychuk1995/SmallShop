@@ -21,6 +21,11 @@
   function money(n) { return Number.isFinite(n) ? n.toFixed(2) : ""; }
   function round2(n) { return Math.round(n * 100) / 100; }
 
+  function toast(msg) {
+    // если у тебя есть SweetAlert — можно заменить на Swal.fire(...)
+    alert(msg);
+  }
+
   // ---------------- pricing ----------------
   function matchRule(cost, rules) {
     if (!Number.isFinite(cost) || !Array.isArray(rules)) return null;
@@ -382,13 +387,12 @@
       if (!blockEl) return;
 
       blockEl.remove();
-
       Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
       recalcAll(blocksContainer, pricing, laborRates);
     });
   }
 
-  // ---------------- customer/unit (NO reload, KEEP blocks) ----------------
+  // ---------------- customer/unit ----------------
   function setSelectOptions(selectEl, items, placeholder) {
     if (!selectEl) return;
     selectEl.innerHTML = "";
@@ -414,7 +418,7 @@
     return Array.isArray(data.items) ? data.items : [];
   }
 
-  // ---------------- restore draft (NEW) ----------------
+  // ---------------- restore draft ----------------
   function ensureBlocksCount(blocksContainer, desiredCount) {
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
     while (blocks.length < desiredCount) {
@@ -428,21 +432,16 @@
     if (!Array.isArray(draftBlocks) || draftBlocks.length === 0) return;
 
     ensureBlocksCount(blocksContainer, draftBlocks.length);
-
     const blockEls = Array.from(blocksContainer.querySelectorAll(".wo-block"));
 
     draftBlocks.forEach((b, bIdx) => {
       const el = blockEls[bIdx];
       if (!el) return;
 
-      // labor
       const ld = el.querySelector(".labor-description");
       const lh = el.querySelector(".labor-hours");
       const lr = el.querySelector(".labor-rate");
 
-      // поддержка двух форматов:
-      // 1) b = { labor_description, labor_hours, labor_rate_code, parts: [...] }
-      // 2) b = { labor: {description, hours, rate_code}, parts: [...] }
       const laborDesc = (b?.labor?.description ?? b?.labor_description ?? "");
       const laborHours = (b?.labor?.hours ?? b?.labor_hours ?? "");
       const laborRate = (b?.labor?.rate_code ?? b?.labor_rate_code ?? "");
@@ -451,7 +450,6 @@
       if (lh) lh.value = String(laborHours ?? "");
       if (lr) lr.value = String(laborRate ?? "");
 
-      // parts
       const tbody = el.querySelector(".partsTbody");
       if (!tbody) return;
 
@@ -472,11 +470,137 @@
         tbody.appendChild(tr);
       });
 
-      // trailing empty row
       tbody.appendChild(makePartsRow(bIdx, parts.length));
     });
 
     Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+  }
+
+  // ---------------- serialize current UI -> blocks[] ----------------
+  function serializeBlocks(blocksContainer) {
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const out = [];
+
+    blocks.forEach((bEl) => {
+      const labor_description = String(bEl.querySelector(".labor-description")?.value || "").trim();
+      const labor_hours = String(bEl.querySelector(".labor-hours")?.value || "").trim();
+      const labor_rate_code = String(bEl.querySelector(".labor-rate")?.value || "").trim();
+
+      const parts = [];
+      const rows = Array.from(bEl.querySelectorAll("tbody.partsTbody tr.parts-row"));
+      rows.forEach((tr) => {
+        const part_number = String(tr.querySelector(".part-number")?.value || "").trim();
+        const description = String(tr.querySelector(".part-description")?.value || "").trim();
+        const qty = String(tr.querySelector(".part-qty")?.value || "").trim();
+        const cost = String(tr.querySelector(".part-cost")?.value || "").trim();
+        if (!(part_number || description || qty || cost)) return;
+        parts.push({
+          part_number,
+          description,
+          qty: qty === "" ? 0 : Number(qty),
+          cost: cost === "" ? 0 : Number(cost),
+        });
+      });
+
+      out.push({
+        labor_description,
+        labor_hours: labor_hours === "" ? 0 : Number(labor_hours),
+        labor_rate_code,
+        parts,
+      });
+    });
+
+    return out;
+  }
+
+  // ---------------- API ----------------
+  async function apiPostJson(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+
+    if (!res.ok) {
+      const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `Request failed (${res.status})`;
+      throw new Error(msg);
+    }
+
+    return data;
+  }
+
+  // ---------------- UI state ----------------
+  function setEditingMode(isEditing, els) {
+    const { editor, customerSel, unitSel, addUnitBtn, addBlockBtn } = els;
+
+    if (!editor) return;
+
+    if (isEditing) {
+      editor.style.pointerEvents = "";
+      editor.style.opacity = "";
+      // customer/unit НЕ даём менять уже созданный ордер (обычно так правильно)
+      if (customerSel) customerSel.disabled = true;
+      if (unitSel) unitSel.disabled = true;
+      if (addUnitBtn) addUnitBtn.disabled = true;
+      if (addBlockBtn) addBlockBtn.disabled = false;
+      document.querySelectorAll(".removeBlockBtn").forEach(b => { b.disabled = false; });
+    } else {
+      editor.style.pointerEvents = "none";
+      editor.style.opacity = "0.75";
+      if (customerSel) customerSel.disabled = true;
+      if (unitSel) unitSel.disabled = true;
+      if (addUnitBtn) addUnitBtn.disabled = true;
+      if (addBlockBtn) addBlockBtn.disabled = true;
+      document.querySelectorAll(".removeBlockBtn").forEach(b => { b.disabled = true; });
+    }
+  }
+
+  function setButtonsState(mode, els) {
+    // mode: "creating" | "created_locked_open" | "editing_open" | "paid"
+    const { createBtn, editBtn, saveBtn, paidBtn, unpaidBtn } = els;
+
+    const show = (el, v) => { if (el) el.style.display = v ? "" : "none"; };
+    const enable = (el, v) => { if (el) el.disabled = !v; };
+
+    if (mode === "creating") {
+      show(createBtn, true); enable(createBtn, false);
+      if (createBtn) createBtn.textContent = "Creating…";
+      show(editBtn, false);
+      show(saveBtn, false);
+      show(paidBtn, false);
+      show(unpaidBtn, false);
+      return;
+    }
+
+    if (mode === "created_locked_open") {
+      show(createBtn, false);
+      show(editBtn, true); enable(editBtn, true);
+      show(saveBtn, false);
+      show(paidBtn, true); enable(paidBtn, true);
+      show(unpaidBtn, false);
+      return;
+    }
+
+    if (mode === "editing_open") {
+      show(createBtn, false);
+      show(editBtn, false);
+      show(saveBtn, true); enable(saveBtn, true);
+      show(paidBtn, true); enable(paidBtn, false); // пока редактируем — paid запрещаем
+      show(unpaidBtn, false);
+      return;
+    }
+
+    if (mode === "paid") {
+      show(createBtn, false);
+      show(editBtn, false);
+      show(saveBtn, false);
+      show(paidBtn, false);
+      show(unpaidBtn, true); enable(unpaidBtn, true);
+      return;
+    }
   }
 
   // ---------------- init ----------------
@@ -498,73 +622,56 @@
 
     const woForm = $("workOrderForm");
     const actionHidden = $("actionHidden");
-    const saveBtn = $("saveDraftBtn");
+
     const createBtn = $("createWorkOrderBtn");
+    const editBtn = $("editWorkOrderBtn");
+    const saveBtn = $("saveWorkOrderBtn");
+    const paidBtn = $("paidWorkOrderBtn");
+    const unpaidBtn = $("unpaidWorkOrderBtn");
+
     const addBlockBtn = $("addBlockBtn");
     const addUnitBtn = $("addUnitBtn");
 
-    function lockUiCreating() {
-      if (editor) {
-        editor.style.pointerEvents = "none";
-        editor.style.opacity = "0.75";
-      }
-      if (customerSel) customerSel.disabled = true;
-      if (unitSel) unitSel.disabled = true;
-      if (addUnitBtn) addUnitBtn.disabled = true;
-
-      if (addBlockBtn) addBlockBtn.disabled = true;
-      document.querySelectorAll(".removeBlockBtn").forEach(b => { b.disabled = true; });
-
-      if (saveBtn) saveBtn.disabled = true;
-
-      if (createBtn) {
-        createBtn.disabled = true;
-        createBtn.textContent = "Creating…";
-      }
-    }
-
-    function submitWithAction(action) {
-      if (!woForm) return;
-
-      if (actionHidden) actionHidden.value = action;
-
-      if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
-      else woForm.submit();
-
-      if (action === "create") setTimeout(lockUiCreating, 0);
-    }
-
-    saveBtn?.addEventListener("click", () => submitWithAction("recalc"));
-    createBtn?.addEventListener("click", () => submitWithAction("create"));
+    const els = {
+      editor, customerSel, unitSel, addUnitBtn, addBlockBtn,
+      createBtn, editBtn, saveBtn, paidBtn, unpaidBtn
+    };
 
     function setEditorEnabled(enabled) {
       if (editor) editor.disabled = !enabled;
       if (hint) hint.style.display = enabled ? "none" : "";
     }
 
-    // ---------- restore draft FIRST (NEW) ----------
+    function submitWithAction(action) {
+      if (!woForm) return;
+      if (actionHidden) actionHidden.value = action;
+
+      if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
+      else woForm.submit();
+
+      if (action === "create") {
+        setButtonsState("creating", els);
+      }
+    }
+
+    // create still uses normal form POST
+    createBtn?.addEventListener("click", () => submitWithAction("create"));
+
+    // ---------- restore draft FIRST ----------
     const draftBlocks = readJsonScript("workOrderDraftData", []);
     applyDraftToUi(blocksContainer, draftBlocks);
 
-    // wire + initial totals
+    // wire + totals
     wireBlockEvents(blocksContainer, pricing, laborRates);
     Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
     recalcAll(blocksContainer, pricing, laborRates);
 
-    // initial enable state
+    // initial enable state (before create)
     setEditorEnabled(!!(unitSel && String(unitSel.value || "").trim()));
 
-    // ---------- lock if created (AFTER restore) ----------
-    const createdInfo = readJsonScript("workOrderCreatedData", { created: false, id: "" });
-    if (createdInfo && createdInfo.created) {
-      lockUiCreating();
-      if (createBtn) createBtn.textContent = createdInfo.id ? `Created (#${createdInfo.id})` : "Created";
-    }
-
-    // customer change
+    // customer/unit change (только пока НЕ создано)
     customerSel?.addEventListener("change", async function () {
       const customerId = String(customerSel.value || "").trim();
-
       if (customerHidden) customerHidden.value = customerId;
       if (createUnitCustomerHidden) createUnitCustomerHidden.value = customerId;
 
@@ -578,13 +685,11 @@
       setEditorEnabled(false);
 
       if (!customerId || !unitSel) return;
-
       const units = await fetchUnits(customerId);
       setSelectOptions(unitSel, units, "-- Select unit --");
       unitSel.disabled = false;
     });
 
-    // unit change
     unitSel?.addEventListener("change", function () {
       const unitId = String(unitSel.value || "").trim();
       if (unitHidden) unitHidden.value = unitId;
@@ -620,7 +725,6 @@
     window.addEventListener("scroll", () => { if (dd.style.display !== "none") hideDropdown(dd); }, true);
     window.addEventListener("resize", () => { if (dd.style.display !== "none") hideDropdown(dd); });
 
-    // search wiring for part-number / part-description
     blocksContainer.addEventListener("focusin", function (e) {
       const inputEl = e.target;
       if (!(inputEl instanceof HTMLInputElement)) return;
@@ -633,15 +737,108 @@
 
       inputEl.addEventListener("input", () => debouncedSearch(dd, inputEl, tr, blockEl));
       inputEl.addEventListener("focus", () => debouncedSearch(dd, inputEl, tr, blockEl));
-
       debouncedSearch(dd, inputEl, tr, blockEl);
     }, { passive: true });
 
-    // add block
     addBlockBtn?.addEventListener("click", function () {
       cloneBlock(blocksContainer);
       Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
       recalcAll(blocksContainer, pricing, laborRates);
     });
+
+    // ---------- created/paid state ----------
+    let workOrderId = "";
+    let workOrderStatus = "open"; // "open" | "paid"
+    let isCreated = false;
+
+    const createdInfo = readJsonScript("workOrderCreatedData", { created: false, id: "", status: "open" });
+    if (createdInfo && createdInfo.created && createdInfo.id) {
+      isCreated = true;
+      workOrderId = String(createdInfo.id);
+      workOrderStatus = String(createdInfo.status || "open");
+    }
+
+    function applyStateFromStatus() {
+      if (!isCreated) {
+        // до create: только create, форма активна по unit
+        setButtonsState("created_locked_open", els); // не показываем
+        if (createBtn) createBtn.style.display = "";
+        if (editBtn) editBtn.style.display = "none";
+        if (saveBtn) saveBtn.style.display = "none";
+        if (paidBtn) paidBtn.style.display = "none";
+        if (unpaidBtn) unpaidBtn.style.display = "none";
+        return;
+      }
+
+      // created: customer/unit больше не меняем
+      if (customerSel) customerSel.disabled = true;
+      if (unitSel) unitSel.disabled = true;
+      if (addUnitBtn) addUnitBtn.disabled = true;
+
+      if (workOrderStatus === "paid") {
+        setEditingMode(false, els);
+        setButtonsState("paid", els);
+      } else {
+        setEditingMode(false, els);
+        setButtonsState("created_locked_open", els);
+      }
+    }
+
+    // edit -> enable
+    editBtn?.addEventListener("click", function () {
+      if (!isCreated || !workOrderId) return;
+      if (workOrderStatus === "paid") return;
+
+      setEditingMode(true, els);
+      setButtonsState("editing_open", els);
+    });
+
+    // save -> API update blocks
+    saveBtn?.addEventListener("click", async function () {
+      if (!isCreated || !workOrderId) return;
+
+      try {
+        const blocks = serializeBlocks(blocksContainer);
+        await apiPostJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/update`, { blocks });
+
+        // после сохранения снова лочим
+        setEditingMode(false, els);
+        setButtonsState("created_locked_open", els);
+        toast("Saved.");
+      } catch (e) {
+        toast(e.message || "Save failed.");
+      }
+    });
+
+    // paid -> status paid
+    paidBtn?.addEventListener("click", async function () {
+      if (!isCreated || !workOrderId) return;
+
+      try {
+        await apiPostJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/status`, { status: "paid" });
+        workOrderStatus = "paid";
+        applyStateFromStatus();
+        toast("Marked as paid.");
+      } catch (e) {
+        toast(e.message || "Failed to set paid.");
+      }
+    });
+
+    // unpaid -> back to open and show edit again
+    unpaidBtn?.addEventListener("click", async function () {
+      if (!isCreated || !workOrderId) return;
+
+      try {
+        await apiPostJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/status`, { status: "open" });
+        workOrderStatus = "open";
+        applyStateFromStatus();
+        toast("Marked as unpaid.");
+      } catch (e) {
+        toast(e.message || "Failed to set unpaid.");
+      }
+    });
+
+    // initial state
+    applyStateFromStatus();
   });
 })();

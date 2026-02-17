@@ -194,6 +194,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "created_work_order_id": (form_state or {}).get("created_work_order_id") or "",
 
         "draft_blocks": (form_state or {}).get("draft_blocks") or [],
+        "work_order_status": (form_state or {}).get("work_order_status") or "open",
     }
 
     return _render_app_page("public/work_orders/work_order_details.html", **ctx)
@@ -399,6 +400,7 @@ def preview_work_order():
                 "work_order_created": True,
                 "created_work_order_id": str(res.inserted_id),
                 "draft_blocks": blocks,
+                "work_order_status": "open",
             },
         )
 
@@ -533,3 +535,84 @@ def api_unit_details():
         "mileage": u.get("mileage") or "",
     }
     return jsonify({"ok": True, "item": item}), 200
+
+
+@work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/update")
+@login_required
+@permission_required("work_orders.create")
+def api_work_order_update(work_order_id):
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "shop_db_missing"}), 200
+
+    wo_id = oid(work_order_id)
+    if not wo_id:
+        return jsonify({"ok": False, "error": "invalid_work_order_id"}), 200
+
+    wo = shop_db.work_orders.find_one({"_id": wo_id, "shop_id": shop["_id"], "is_active": True})
+    if not wo:
+        return jsonify({"ok": False, "error": "work_order_not_found"}), 200
+
+    data = request.get_json(silent=True) or {}
+    blocks = data.get("blocks")
+
+    if not isinstance(blocks, list):
+        return jsonify({"ok": False, "error": "blocks_required"}), 200
+
+    # (опционально) можно запретить редактирование, если paid
+    if (wo.get("status") or "open") == "paid":
+        return jsonify({"ok": False, "error": "paid_cannot_edit"}), 200
+
+    now = utcnow()
+    user_id = current_user_id()
+
+    shop_db.work_orders.update_one(
+        {"_id": wo_id},
+        {
+            "$set": {
+                "blocks": blocks,
+                "updated_at": now,
+                "updated_by": user_id,
+            }
+        }
+    )
+
+    return jsonify({"ok": True}), 200
+
+@work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/status")
+@login_required
+@permission_required("work_orders.create")
+def api_work_order_set_status(work_order_id):
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "shop_db_missing"}), 200
+
+    wo_id = oid(work_order_id)
+    if not wo_id:
+        return jsonify({"ok": False, "error": "invalid_work_order_id"}), 200
+
+    wo = shop_db.work_orders.find_one({"_id": wo_id, "shop_id": shop["_id"], "is_active": True})
+    if not wo:
+        return jsonify({"ok": False, "error": "work_order_not_found"}), 200
+
+    data = request.get_json(silent=True) or {}
+    status = (data.get("status") or "").strip().lower()
+
+    if status not in ("open", "paid"):
+        return jsonify({"ok": False, "error": "invalid_status"}), 200
+
+    now = utcnow()
+    user_id = current_user_id()
+
+    shop_db.work_orders.update_one(
+        {"_id": wo_id},
+        {
+            "$set": {
+                "status": status,
+                "updated_at": now,
+                "updated_by": user_id,
+            }
+        }
+    )
+
+    return jsonify({"ok": True, "status": status}), 200
