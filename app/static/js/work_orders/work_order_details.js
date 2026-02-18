@@ -804,7 +804,7 @@
       if (addUnitBtn) addUnitBtn.disabled = !customerId;
 
       const defaultRateCode = getCustomerDefaultLaborRate(customersData, customerId);
-      applyDefaultLaborRateToAll(blocksContainer, defaultRateCode, true);
+      applyDefaultLaborRateToAll(blocksContainer, defaultRateCode, false);
       recalcAll(blocksContainer, pricing, laborRates);
 
       if (unitHidden) unitHidden.value = "";
