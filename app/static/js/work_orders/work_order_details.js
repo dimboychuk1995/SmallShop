@@ -145,8 +145,8 @@
       <td><input class="form-control form-control-sm part-number" name="labors[${laborIndex}][parts][${rowIndex}][part_number]" maxlength="64" autocomplete="off"></td>
       <td><input class="form-control form-control-sm part-description" name="labors[${laborIndex}][parts][${rowIndex}][description]" maxlength="200" autocomplete="off"></td>
       <td><input class="form-control form-control-sm part-qty" name="labors[${laborIndex}][parts][${rowIndex}][qty]" inputmode="numeric"></td>
-      <td><input class="form-control form-control-sm part-cost" name="labors[${laborIndex}][parts][${rowIndex}][cost]" inputmode="decimal"></td>
-      <td><input class="form-control form-control-sm part-price" value="" readonly tabindex="-1"></td>
+      <td><input class="form-control form-control-sm part-cost" name="labors[${laborIndex}][parts][${rowIndex}][cost]" inputmode="decimal" readonly tabindex="-1"></td>
+      <td><input class="form-control form-control-sm part-price" name="labors[${laborIndex}][parts][${rowIndex}][price]" value="" inputmode="decimal"></td>
       <td class="part-line-total"><span class="text-muted">—</span></td>
     `;
     return tr;
@@ -157,13 +157,12 @@
     const ds = tr.querySelector(".part-description")?.value || "";
     const q = tr.querySelector(".part-qty")?.value || "";
     const c = tr.querySelector(".part-cost")?.value || "";
-    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim());
+    const p = tr.querySelector(".part-price")?.value || "";
+    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim() || String(p).trim());
   }
 
   function clearRowCalc(tr) {
-    const priceInput = tr.querySelector(".part-price");
     const lineCell = tr.querySelector(".part-line-total");
-    if (priceInput) priceInput.value = "";
     if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
   }
 
@@ -173,30 +172,28 @@
     const priceInput = tr.querySelector(".part-price");
     const lineCell = tr.querySelector(".part-line-total");
 
-    if (!pricing || !Array.isArray(pricing.rules) || pricing.rules.length === 0) {
-      clearRowCalc(tr);
-      return null;
+    let price = toNum(priceInput?.value);
+
+    if (price === null && Number.isFinite(cost) && cost >= 0 && !tr.dataset.priceAutofilled) {
+      if (pricing && Array.isArray(pricing.rules) && pricing.rules.length > 0) {
+        const rule = matchRule(cost, pricing.rules);
+        if (rule) {
+          const autoPrice = calcPriceFromRule(cost, pricing.mode, rule.value_percent);
+          if (autoPrice !== null && priceInput) {
+            priceInput.value = money(autoPrice);
+            tr.dataset.priceAutofilled = "1";
+            price = autoPrice;
+          }
+        }
+      }
     }
 
-    if (qty === null || qty <= 0 || cost === null || cost < 0) {
-      clearRowCalc(tr);
-      return null;
-    }
-
-    const rule = matchRule(cost, pricing.rules);
-    if (!rule) {
-      clearRowCalc(tr);
-      return null;
-    }
-
-    const price = calcPriceFromRule(cost, pricing.mode, rule.value_percent);
-    if (price === null) {
+    if (qty === null || qty <= 0 || price === null || price < 0) {
       clearRowCalc(tr);
       return null;
     }
 
     const lt = round2(price * qty);
-    if (priceInput) priceInput.value = money(price);
     if (lineCell) lineCell.innerHTML = `<strong>$${money(lt)}</strong>`;
     return lt;
   }
@@ -427,6 +424,10 @@
       ds.value = ref && ref !== d ? `${d} (${ref})` : d;
     }
     if (cost) cost.value = (part.average_cost != null) ? String(part.average_cost) : "";
+
+    const price = tr.querySelector(".part-price");
+    if (price) price.value = "";
+    delete tr.dataset.priceAutofilled;
   }
 
   const debouncedSearch = debounce(async function (dd, inputEl, tr, blockEl) {
@@ -461,6 +462,7 @@
       tr.querySelector(".part-description").name = `labors[${idx}][parts][${rIdx}][description]`;
       tr.querySelector(".part-qty").name = `labors[${idx}][parts][${rIdx}][qty]`;
       tr.querySelector(".part-cost").name = `labors[${idx}][parts][${rIdx}][cost]`;
+      tr.querySelector(".part-price").name = `labors[${idx}][parts][${rIdx}][price]`;
     });
   }
 
@@ -470,7 +472,6 @@
     const clone = last.cloneNode(true);
 
     clone.querySelectorAll("input").forEach(i => {
-      if (i.classList.contains("part-price")) return;
       i.value = "";
     });
     clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
@@ -584,6 +585,8 @@
         tr.querySelector(".part-description").value = String(p?.description ?? "");
         tr.querySelector(".part-qty").value = String(p?.qty ?? "");
         tr.querySelector(".part-cost").value = String(p?.cost ?? "");
+        tr.querySelector(".part-price").value = String(p?.price ?? "");
+        if (String(p?.price ?? "").trim()) tr.dataset.priceAutofilled = "1";
         tbody.appendChild(tr);
       });
 
@@ -610,12 +613,14 @@
         const description = String(tr.querySelector(".part-description")?.value || "").trim();
         const qty = String(tr.querySelector(".part-qty")?.value || "").trim();
         const cost = String(tr.querySelector(".part-cost")?.value || "").trim();
-        if (!(part_number || description || qty || cost)) return;
+        const price = String(tr.querySelector(".part-price")?.value || "").trim();
+        if (!(part_number || description || qty || cost || price)) return;
         parts.push({
           part_number,
           description,
           qty: qty === "" ? 0 : Number(qty),
           cost: cost === "" ? 0 : Number(cost),
+          price: price === "" ? 0 : Number(price),
         });
       });
 

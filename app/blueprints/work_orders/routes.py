@@ -310,7 +310,7 @@ def preview_work_order():
     # labor
     labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
     # parts
-    parts_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost)\]$")
+    parts_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price)\]$")
 
     for key, val in request.form.items():
         m = labor_re.match(key)
@@ -343,6 +343,8 @@ def preview_work_order():
                 b["parts"][ridx]["qty"] = (val or "").strip()
             elif field == "cost":
                 b["parts"][ridx]["cost"] = (val or "").strip()
+            elif field == "price":
+                b["parts"][ridx]["price"] = (val or "").strip()
             continue
 
     # normalize labors list in order
@@ -357,13 +359,15 @@ def preview_work_order():
             ds = (p.get("description") or "").strip()
             qty = (p.get("qty") or "").strip()
             cost = (p.get("cost") or "").strip()
-            if not (pn or ds or qty or cost):
+            price = (p.get("price") or "").strip()
+            if not (pn or ds or qty or cost or price):
                 continue
             parts_clean.append({
                 "part_number": pn,
                 "description": ds,
                 "qty": qty,
                 "cost": cost,
+                "price": price,
             })
 
         labor = b.get("labor") or {}
