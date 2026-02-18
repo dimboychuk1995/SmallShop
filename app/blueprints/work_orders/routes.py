@@ -193,7 +193,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "work_order_created": bool((form_state or {}).get("work_order_created")),
         "created_work_order_id": (form_state or {}).get("created_work_order_id") or "",
 
-        "draft_blocks": (form_state or {}).get("draft_blocks") or [],
+        "draft_labors": (form_state or {}).get("draft_labors") or (form_state or {}).get("draft_blocks") or [],
         "work_order_status": (form_state or {}).get("work_order_status") or "open",
     }
 
@@ -291,26 +291,26 @@ def preview_work_order():
         flash("Unit is required.", "error")
         return redirect(url_for("work_orders.work_order_details_page", customer_id=str(customer_id)))
 
-    # ---- parse blocks ----
+    # ---- parse labors ----
     # inputs come like:
-    # blocks[0][labor_description], blocks[0][labor_hours], blocks[0][labor_rate_code]
-    # blocks[0][parts][0][part_number] ... etc
+    # labors[0][labor_description], labors[0][labor_hours], labors[0][labor_rate_code]
+    # labors[0][parts][0][part_number] ... etc
     import re
     import json
 
-    blocks_map: dict[int, dict] = {}
+    labors_map: dict[int, dict] = {}
 
     # labor
-    labor_re = re.compile(r"^blocks\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
+    labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
     # parts
-    parts_re = re.compile(r"^blocks\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost)\]$")
+    parts_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost)\]$")
 
     for key, val in request.form.items():
         m = labor_re.match(key)
         if m:
             bidx = int(m.group(1))
             field = m.group(2)
-            b = blocks_map.setdefault(bidx, {"labor": {}, "parts": []})
+            b = labors_map.setdefault(bidx, {"labor": {}, "parts": []})
 
             if field == "labor_description":
                 b["labor"]["description"] = (val or "").strip()
@@ -326,7 +326,7 @@ def preview_work_order():
             ridx = int(m.group(2))
             field = m.group(3)
 
-            b = blocks_map.setdefault(bidx, {"labor": {}, "parts": []})
+            b = labors_map.setdefault(bidx, {"labor": {}, "parts": []})
             while len(b["parts"]) <= ridx:
                 b["parts"].append({})
 
@@ -338,10 +338,10 @@ def preview_work_order():
                 b["parts"][ridx]["cost"] = (val or "").strip()
             continue
 
-    # normalize blocks list in order
-    blocks = []
-    for bidx in sorted(blocks_map.keys()):
-        b = blocks_map[bidx]
+    # normalize labors list in order
+    labors = []
+    for bidx in sorted(labors_map.keys()):
+        b = labors_map[bidx]
 
         # drop empty trailing part rows
         parts_clean = []
@@ -360,7 +360,7 @@ def preview_work_order():
             })
 
         labor = b.get("labor") or {}
-        blocks.append({
+        labors.append({
             "labor": {
                 "description": (labor.get("description") or "").strip(),
                 "hours": (labor.get("hours") or "").strip(),
@@ -390,7 +390,7 @@ def preview_work_order():
             "customer_id": customer_id,
             "unit_id": unit_id,
             "status": "open",
-            "blocks": blocks,
+            "labors": labors,
 
             # ✅ store totals from UI
             "totals": totals,
@@ -413,7 +413,7 @@ def preview_work_order():
             form_state={
                 "work_order_created": True,
                 "created_work_order_id": str(res.inserted_id),
-                "draft_blocks": blocks,
+                "draft_labors": labors,
                 "work_order_status": "open",
             },
         )
@@ -568,11 +568,11 @@ def api_work_order_update(work_order_id):
         return jsonify({"ok": False, "error": "work_order_not_found"}), 200
 
     data = request.get_json(silent=True) or {}
-    blocks = data.get("blocks")
+    labors = data.get("labors", data.get("blocks"))
     totals = data.get("totals") or {}
 
-    if not isinstance(blocks, list):
-        return jsonify({"ok": False, "error": "blocks_required"}), 200
+    if not isinstance(labors, list):
+        return jsonify({"ok": False, "error": "labors_required"}), 200
 
     if totals is not None and not isinstance(totals, dict):
         totals = {}
@@ -588,11 +588,14 @@ def api_work_order_update(work_order_id):
         {"_id": wo_id},
         {
             "$set": {
-                "blocks": blocks,
+                "labors": labors,
                 "totals": totals,  # ✅ сохраняем totals от фронта
                 "updated_at": now,
                 "updated_by": user_id,
-            }
+            },
+            "$unset": {
+                "blocks": "",
+            },
         }
     )
 

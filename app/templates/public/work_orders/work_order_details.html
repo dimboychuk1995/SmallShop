@@ -110,7 +110,7 @@
     <!-- Data for JS -->
     <script type="application/json" id="laborRatesData">{{ labor_rates|tojson }}</script>
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
-    <script type="application/json" id="workOrderDraftData">{{ (draft_blocks or [])|tojson }}</script>
+    <script type="application/json" id="workOrderDraftData">{{ (draft_labors or draft_blocks or [])|tojson }}</script>
     <script type="application/json" id="workOrderCreatedData">{{ {"created": work_order_created, "id": created_work_order_id, "status": work_order_status}|tojson }}</script>
 
 
@@ -126,7 +126,7 @@
 
       <!-- info -->
       <div id="selectHint" class="alert alert-info mb-3" {% if selected_unit_id %}style="display:none;"{% endif %}>
-        Select a customer and unit to continue. Your draft blocks will stay on the page when you switch customer/unit.
+        Select a customer and unit to continue. Your draft labors will stay on the page when you switch customer/unit.
       </div>
 
       <fieldset id="workOrderEditor" {% if not selected_unit_id %}disabled{% endif %}>
@@ -136,29 +136,29 @@
         </div>
 
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <div class="text-muted small">Blocks: <strong id="blockCount">1</strong></div>
-          <button type="button" class="btn btn-outline-primary btn-sm" id="addBlockBtn">+ Add Block</button>
+          <div class="text-muted small">Labors: <strong id="laborCount">1</strong></div>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="addLaborBtn">+ Add Labor</button>
         </div>
 
-        <div id="blocksContainer">
+        <div id="laborsContainer">
 
           <!-- Block template instance #0 -->
-          <div class="card border mb-3 wo-block" data-block-index="0">
+          <div class="card border mb-3 wo-labor" data-labor-index="0">
             <div class="card-body">
 
               <div class="d-flex justify-content-between align-items-center">
                 <div>
-                  <h2 class="h6 mb-0">Block <span class="block-number">1</span></h2>
+                  <h2 class="h6 mb-0">Labor <span class="labor-number">1</span></h2>
                   <div class="text-muted small mt-1">
                     Labor: <strong class="laborTotalDisplay">—</strong>
                     &nbsp;|&nbsp;
                     Parts: <strong class="partsTotalDisplay">—</strong>
                     &nbsp;|&nbsp;
-                    Block total: <strong class="blockTotalDisplay">—</strong>
+                    Labor total: <strong class="laborFullTotalDisplay">—</strong>
                   </div>
                 </div>
 
-                <button type="button" class="btn btn-outline-danger btn-sm removeBlockBtn" disabled>
+                <button type="button" class="btn btn-outline-danger btn-sm removeLaborBtn" disabled>
                   Remove
                 </button>
               </div>
@@ -168,17 +168,17 @@
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label">Labor Description</label>
-                  <input class="form-control labor-description" name="blocks[0][labor_description]" maxlength="200">
+                  <input class="form-control labor-description" name="labors[0][labor_description]" maxlength="200">
                 </div>
 
                 <div class="col-md-2">
                   <label class="form-label">Hours</label>
-                  <input class="form-control labor-hours" name="blocks[0][labor_hours]" inputmode="decimal">
+                  <input class="form-control labor-hours" name="labors[0][labor_hours]" inputmode="decimal">
                 </div>
 
                 <div class="col-md-4">
                   <label class="form-label">Labor Rate</label>
-                  <select class="form-select labor-rate" name="blocks[0][labor_rate_code]">
+                  <select class="form-select labor-rate" name="labors[0][labor_rate_code]">
                     <option value="">-- Select rate --</option>
                     {% for r in labor_rates %}
                       <option value="{{ r.code }}">{{ r.name }} (${{ "%.2f"|format(r.hourly_rate) }}/hr)</option>
@@ -205,10 +205,10 @@
 
                     <tbody class="partsTbody">
                       <tr class="parts-row" data-index="0">
-                        <td><input class="form-control form-control-sm part-number" name="blocks[0][parts][0][part_number]" maxlength="64" autocomplete="off"></td>
-                        <td><input class="form-control form-control-sm part-description" name="blocks[0][parts][0][description]" maxlength="200" autocomplete="off"></td>
-                        <td><input class="form-control form-control-sm part-qty" name="blocks[0][parts][0][qty]" inputmode="numeric"></td>
-                        <td><input class="form-control form-control-sm part-cost" name="blocks[0][parts][0][cost]" inputmode="decimal"></td>
+                        <td><input class="form-control form-control-sm part-number" name="labors[0][parts][0][part_number]" maxlength="64" autocomplete="off"></td>
+                        <td><input class="form-control form-control-sm part-description" name="labors[0][parts][0][description]" maxlength="200" autocomplete="off"></td>
+                        <td><input class="form-control form-control-sm part-qty" name="labors[0][parts][0][qty]" inputmode="numeric"></td>
+                        <td><input class="form-control form-control-sm part-cost" name="labors[0][parts][0][cost]" inputmode="decimal"></td>
                         <td><input class="form-control form-control-sm part-price" value="" readonly tabindex="-1"></td>
                         <td class="part-line-total"><span class="text-muted">—</span></td>
                       </tr>

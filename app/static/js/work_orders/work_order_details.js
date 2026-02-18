@@ -80,16 +80,16 @@
   }
 
   // ---------------- parts rows ----------------
-  function makePartsRow(blockIndex, rowIndex) {
+  function makePartsRow(laborIndex, rowIndex) {
     const tr = document.createElement("tr");
     tr.className = "parts-row";
     tr.dataset.index = String(rowIndex);
 
     tr.innerHTML = `
-      <td><input class="form-control form-control-sm part-number" name="blocks[${blockIndex}][parts][${rowIndex}][part_number]" maxlength="64" autocomplete="off"></td>
-      <td><input class="form-control form-control-sm part-description" name="blocks[${blockIndex}][parts][${rowIndex}][description]" maxlength="200" autocomplete="off"></td>
-      <td><input class="form-control form-control-sm part-qty" name="blocks[${blockIndex}][parts][${rowIndex}][qty]" inputmode="numeric"></td>
-      <td><input class="form-control form-control-sm part-cost" name="blocks[${blockIndex}][parts][${rowIndex}][cost]" inputmode="decimal"></td>
+      <td><input class="form-control form-control-sm part-number" name="labors[${laborIndex}][parts][${rowIndex}][part_number]" maxlength="64" autocomplete="off"></td>
+      <td><input class="form-control form-control-sm part-description" name="labors[${laborIndex}][parts][${rowIndex}][description]" maxlength="200" autocomplete="off"></td>
+      <td><input class="form-control form-control-sm part-qty" name="labors[${laborIndex}][parts][${rowIndex}][qty]" inputmode="numeric"></td>
+      <td><input class="form-control form-control-sm part-cost" name="labors[${laborIndex}][parts][${rowIndex}][cost]" inputmode="decimal"></td>
       <td><input class="form-control form-control-sm part-price" value="" readonly tabindex="-1"></td>
       <td class="part-line-total"><span class="text-muted">—</span></td>
     `;
@@ -151,13 +151,13 @@
 
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
     if (rows.length === 0) {
-      tbody.appendChild(makePartsRow(Number(blockEl.dataset.blockIndex), 0));
+      tbody.appendChild(makePartsRow(Number(blockEl.dataset.laborIndex), 0));
       return;
     }
 
     const last = rows[rows.length - 1];
     if (rowHasAnyInput(last)) {
-      tbody.appendChild(makePartsRow(Number(blockEl.dataset.blockIndex), rows.length));
+      tbody.appendChild(makePartsRow(Number(blockEl.dataset.laborIndex), rows.length));
     }
   }
 
@@ -185,7 +185,7 @@
   function setBlockTotalsUI(blockEl, laborTotal, partsTotal) {
     const laborEl = blockEl.querySelector(".laborTotalDisplay");
     const partsEl = blockEl.querySelector(".partsTotalDisplay");
-    const blockElTotal = blockEl.querySelector(".blockTotalDisplay");
+    const blockElTotal = blockEl.querySelector(".laborFullTotalDisplay");
 
     if (laborEl) laborEl.textContent = Number.isFinite(laborTotal) ? `$${money(laborTotal)}` : "—";
     if (partsEl) partsEl.textContent = Number.isFinite(partsTotal) ? `$${money(partsTotal)}` : "—";
@@ -205,7 +205,7 @@
   }
 
   function recalcAll(blocksContainer, pricing, laborRates) {
-    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     let grand = 0;
     for (const b of blocks) grand += recalcBlock(b, pricing, laborRates);
     grand = round2(grand);
@@ -213,11 +213,11 @@
     const grandEl = $("grandTotalDisplay");
     if (grandEl) grandEl.textContent = blocks.length ? `$${money(grand)}` : "—";
 
-    const cnt = $("blockCount");
+    const cnt = $("laborCount");
     if (cnt) cnt.textContent = String(blocks.length);
 
     blocks.forEach((b) => {
-      const btn = b.querySelector(".removeBlockBtn");
+      const btn = b.querySelector(".removeLaborBtn");
       if (!btn) return;
       btn.disabled = blocks.length <= 1;
     });
@@ -225,7 +225,7 @@
 
   // ---------------- totals serialization (FRONT -> BACK) ----------------
   function serializeTotals(blocksContainer) {
-    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     const outBlocks = [];
 
     let laborSum = 0;
@@ -235,7 +235,7 @@
     blocks.forEach((bEl) => {
       const laborText = bEl.querySelector(".laborTotalDisplay")?.textContent || "0";
       const partsText = bEl.querySelector(".partsTotalDisplay")?.textContent || "0";
-      const blockText = bEl.querySelector(".blockTotalDisplay")?.textContent || "0";
+      const blockText = bEl.querySelector(".laborFullTotalDisplay")?.textContent || "0";
 
       const laborTotal = round2(parseMoneyText(laborText));
       const partsTotal = round2(parseMoneyText(partsText));
@@ -248,7 +248,7 @@
       outBlocks.push({
         labor_total: laborTotal,
         parts_total: partsTotal,
-        block_total: blockTotal,
+        labor_full_total: blockTotal,
       });
     });
 
@@ -261,7 +261,7 @@
       labor_total: round2(laborSum),
       parts_total: round2(partsSum),
       grand_total: grandFinal,
-      blocks: outBlocks,
+      labors: outBlocks,
     };
   }
 
@@ -390,26 +390,26 @@
 
   // ---------------- blocks add/remove ----------------
   function renumberBlock(blockEl, idx) {
-    blockEl.dataset.blockIndex = String(idx);
-    blockEl.querySelector(".block-number").textContent = String(idx + 1);
+    blockEl.dataset.laborIndex = String(idx);
+    blockEl.querySelector(".labor-number").textContent = String(idx + 1);
 
-    blockEl.querySelector(".labor-description").name = `blocks[${idx}][labor_description]`;
-    blockEl.querySelector(".labor-hours").name = `blocks[${idx}][labor_hours]`;
-    blockEl.querySelector(".labor-rate").name = `blocks[${idx}][labor_rate_code]`;
+    blockEl.querySelector(".labor-description").name = `labors[${idx}][labor_description]`;
+    blockEl.querySelector(".labor-hours").name = `labors[${idx}][labor_hours]`;
+    blockEl.querySelector(".labor-rate").name = `labors[${idx}][labor_rate_code]`;
 
     const tbody = blockEl.querySelector(".partsTbody");
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
     rows.forEach((tr, rIdx) => {
       tr.dataset.index = String(rIdx);
-      tr.querySelector(".part-number").name = `blocks[${idx}][parts][${rIdx}][part_number]`;
-      tr.querySelector(".part-description").name = `blocks[${idx}][parts][${rIdx}][description]`;
-      tr.querySelector(".part-qty").name = `blocks[${idx}][parts][${rIdx}][qty]`;
-      tr.querySelector(".part-cost").name = `blocks[${idx}][parts][${rIdx}][cost]`;
+      tr.querySelector(".part-number").name = `labors[${idx}][parts][${rIdx}][part_number]`;
+      tr.querySelector(".part-description").name = `labors[${idx}][parts][${rIdx}][description]`;
+      tr.querySelector(".part-qty").name = `labors[${idx}][parts][${rIdx}][qty]`;
+      tr.querySelector(".part-cost").name = `labors[${idx}][parts][${rIdx}][cost]`;
     });
   }
 
   function cloneBlock(blocksContainer) {
-    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     const last = blocks[blocks.length - 1];
     const clone = last.cloneNode(true);
 
@@ -418,7 +418,7 @@
       i.value = "";
     });
     clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
-    clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .blockTotalDisplay").forEach(el => el.textContent = "—");
+    clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .laborFullTotalDisplay").forEach(el => el.textContent = "—");
 
     const tbody = clone.querySelector(".partsTbody");
     tbody.innerHTML = "";
@@ -432,23 +432,23 @@
     blocksContainer.addEventListener("input", function (e) {
       const t = e.target;
       if (!t) return;
-      const blockEl = t.closest(".wo-block");
+      const blockEl = t.closest(".wo-labor");
       if (!blockEl) return;
       recalcAll(blocksContainer, pricing, laborRates);
     });
 
     blocksContainer.addEventListener("click", function (e) {
-      const btn = e.target.closest(".removeBlockBtn");
+      const btn = e.target.closest(".removeLaborBtn");
       if (!btn) return;
 
-      const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+      const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
       if (blocks.length <= 1) return;
 
-      const blockEl = btn.closest(".wo-block");
+      const blockEl = btn.closest(".wo-labor");
       if (!blockEl) return;
 
       blockEl.remove();
-      Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+      Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
       recalcAll(blocksContainer, pricing, laborRates);
     });
   }
@@ -481,19 +481,19 @@
 
   // ---------------- restore draft ----------------
   function ensureBlocksCount(blocksContainer, desiredCount) {
-    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     while (blocks.length < desiredCount) {
       cloneBlock(blocksContainer);
-      blocks.push(blocksContainer.querySelectorAll(".wo-block")[blocks.length]);
+      blocks.push(blocksContainer.querySelectorAll(".wo-labor")[blocks.length]);
     }
-    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+    Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
   }
 
   function applyDraftToUi(blocksContainer, draftBlocks) {
     if (!Array.isArray(draftBlocks) || draftBlocks.length === 0) return;
 
     ensureBlocksCount(blocksContainer, draftBlocks.length);
-    const blockEls = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const blockEls = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
 
     draftBlocks.forEach((b, bIdx) => {
       const el = blockEls[bIdx];
@@ -534,12 +534,12 @@
       tbody.appendChild(makePartsRow(bIdx, parts.length));
     });
 
-    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+    Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
   }
 
   // ---------------- serialize current UI -> blocks[] ----------------
   function serializeBlocks(blocksContainer) {
-    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-block"));
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     const out = [];
 
     blocks.forEach((bEl) => {
@@ -595,7 +595,7 @@
 
   // ---------------- UI state ----------------
   function setEditingMode(isEditing, els) {
-    const { editor, customerSel, unitSel, addUnitBtn, addBlockBtn } = els;
+    const { editor, customerSel, unitSel, addUnitBtn, addLaborBtn } = els;
 
     if (!editor) return;
 
@@ -606,16 +606,16 @@
       if (customerSel) customerSel.disabled = true;
       if (unitSel) unitSel.disabled = true;
       if (addUnitBtn) addUnitBtn.disabled = true;
-      if (addBlockBtn) addBlockBtn.disabled = false;
-      document.querySelectorAll(".removeBlockBtn").forEach(b => { b.disabled = false; });
+      if (addLaborBtn) addLaborBtn.disabled = false;
+      document.querySelectorAll(".removeLaborBtn").forEach(b => { b.disabled = false; });
     } else {
       editor.style.pointerEvents = "none";
       editor.style.opacity = "0.75";
       if (customerSel) customerSel.disabled = true;
       if (unitSel) unitSel.disabled = true;
       if (addUnitBtn) addUnitBtn.disabled = true;
-      if (addBlockBtn) addBlockBtn.disabled = true;
-      document.querySelectorAll(".removeBlockBtn").forEach(b => { b.disabled = true; });
+      if (addLaborBtn) addLaborBtn.disabled = true;
+      document.querySelectorAll(".removeLaborBtn").forEach(b => { b.disabled = true; });
     }
   }
 
@@ -669,7 +669,7 @@
     const laborRates = readJsonScript("laborRatesData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
 
-    const blocksContainer = $("blocksContainer");
+    const blocksContainer = $("laborsContainer");
     if (!blocksContainer) return;
 
     const customerSel = $("customerSelect");
@@ -690,11 +690,11 @@
     const paidBtn = $("paidWorkOrderBtn");
     const unpaidBtn = $("unpaidWorkOrderBtn");
 
-    const addBlockBtn = $("addBlockBtn");
+    const addLaborBtn = $("addLaborBtn");
     const addUnitBtn = $("addUnitBtn");
 
     const els = {
-      editor, customerSel, unitSel, addUnitBtn, addBlockBtn,
+      editor, customerSel, unitSel, addUnitBtn, addLaborBtn,
       createBtn, editBtn, saveBtn, paidBtn, unpaidBtn
     };
 
@@ -728,7 +728,7 @@
 
     // wire + totals
     wireBlockEvents(blocksContainer, pricing, laborRates);
-    Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+    Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
     recalcAll(blocksContainer, pricing, laborRates);
 
     // initial enable state (before create)
@@ -798,7 +798,7 @@
       if (!(target.classList.contains("part-number") || target.classList.contains("part-description"))) return;
 
       const tr = target.closest("tr.parts-row");
-      const blockEl = target.closest(".wo-block");
+      const blockEl = target.closest(".wo-labor");
       if (!tr || !blockEl) return;
 
       target.addEventListener("input", () => debouncedSearch(dd, target, tr, blockEl));
@@ -806,9 +806,9 @@
       debouncedSearch(dd, target, tr, blockEl);
     }, { passive: true });
 
-    addBlockBtn?.addEventListener("click", function () {
+    addLaborBtn?.addEventListener("click", function () {
       cloneBlock(blocksContainer);
-      Array.from(blocksContainer.querySelectorAll(".wo-block")).forEach((b, idx) => renumberBlock(b, idx));
+      Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
       recalcAll(blocksContainer, pricing, laborRates);
     });
 
@@ -859,17 +859,17 @@
       setButtonsState("editing_open", els);
     });
 
-    // save -> API update blocks + totals
+    // save -> API update labors + totals
     saveBtn?.addEventListener("click", async function () {
       if (!isCreated || !workOrderId) return;
 
       try {
-        const blocks = serializeBlocks(blocksContainer);
+        const labors = serializeBlocks(blocksContainer);
         const totals = serializeTotals(blocksContainer);
 
         await apiPostJson(
           `/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/update`,
-          { blocks, totals }
+          { labors, totals }
         );
 
         // после сохранения снова лочим
