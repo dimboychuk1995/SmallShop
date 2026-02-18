@@ -39,7 +39,7 @@
         </div>
 
         <div class="col-md-4">
-          <button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#createUnitModal"
+          <button id="addUnitBtn" type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#createUnitModal"
                   {% if not selected_customer_id %}disabled{% endif %}>
             + Add Unit
           </button>
@@ -108,6 +108,7 @@
     </div>
 
     <!-- Data for JS -->
+    <script type="application/json" id="customersData">{{ customers|tojson }}</script>
     <script type="application/json" id="laborRatesData">{{ labor_rates|tojson }}</script>
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
     <script type="application/json" id="workOrderDraftData">{{ (draft_labors or draft_blocks or [])|tojson }}</script>

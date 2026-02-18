@@ -68,6 +68,62 @@
     return toNum(found.hourly_rate);
   }
 
+  function getCustomerDefaultLaborRate(customers, customerId) {
+    if (!Array.isArray(customers) || !customerId) return "";
+    const found = customers.find(x => String(x.id || "") === String(customerId));
+    if (!found) return "";
+    return String(found.default_labor_rate || "").trim();
+  }
+
+  function normalizeRateKey(v) {
+    const key = String(v || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_\-\s]+/g, "");
+    if (key === "standart") return "standard";
+    return key;
+  }
+
+  function selectRateIfExists(selectEl, rateCode) {
+    if (!selectEl || !rateCode) return false;
+    const targetKey = normalizeRateKey(rateCode);
+    const options = Array.from(selectEl.options || []);
+
+    for (const opt of options) {
+      if (!String(opt.value || "").trim()) continue;
+
+      const optionCodeKey = normalizeRateKey(opt.value);
+      const optionName = String(opt.textContent || "").split("(")[0].trim();
+      const optionNameKey = normalizeRateKey(optionName);
+
+      if (optionCodeKey === targetKey || optionNameKey === targetKey) {
+        selectEl.value = String(opt.value);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function applyDefaultLaborRateToAll(blocksContainer, rateCode, onlyIfEmpty) {
+    if (!blocksContainer || !rateCode) return;
+    const selects = Array.from(blocksContainer.querySelectorAll(".wo-labor .labor-rate"));
+    selects.forEach((sel) => {
+      const current = String(sel.value || "").trim();
+      if (onlyIfEmpty && current) return;
+      selectRateIfExists(sel, rateCode);
+    });
+  }
+
+  function applyDefaultLaborRateToBlock(blockEl, rateCode, onlyIfEmpty) {
+    if (!blockEl || !rateCode) return;
+    const sel = blockEl.querySelector(".labor-rate");
+    if (!sel) return;
+    const current = String(sel.value || "").trim();
+    if (onlyIfEmpty && current) return;
+    selectRateIfExists(sel, rateCode);
+  }
+
   function calcLaborTotal(blockEl, laborRates) {
     const hours = toNum(blockEl.querySelector(".labor-hours")?.value);
     const code = String(blockEl.querySelector(".labor-rate")?.value || "").trim();
@@ -666,6 +722,7 @@
 
   // ---------------- init ----------------
   document.addEventListener("DOMContentLoaded", function () {
+    const customersData = readJsonScript("customersData", []);
     const laborRates = readJsonScript("laborRatesData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
 
@@ -739,6 +796,11 @@
       const customerId = String(customerSel.value || "").trim();
       if (customerHidden) customerHidden.value = customerId;
       if (createUnitCustomerHidden) createUnitCustomerHidden.value = customerId;
+      if (addUnitBtn) addUnitBtn.disabled = !customerId;
+
+      const defaultRateCode = getCustomerDefaultLaborRate(customersData, customerId);
+      applyDefaultLaborRateToAll(blocksContainer, defaultRateCode, true);
+      recalcAll(blocksContainer, pricing, laborRates);
 
       if (unitHidden) unitHidden.value = "";
       if (unitSel) {
@@ -753,6 +815,14 @@
       const units = await fetchUnits(customerId);
       setSelectOptions(unitSel, units, "-- Select unit --");
       unitSel.disabled = false;
+
+      if (Array.isArray(units) && units.length === 0) {
+        const createUnitModalEl = $("createUnitModal");
+        if (createUnitModalEl && window.bootstrap && window.bootstrap.Modal) {
+          const modal = window.bootstrap.Modal.getOrCreateInstance(createUnitModalEl);
+          modal.show();
+        }
+      }
     });
 
     unitSel?.addEventListener("change", function () {
@@ -807,8 +877,13 @@
     }, { passive: true });
 
     addLaborBtn?.addEventListener("click", function () {
-      cloneBlock(blocksContainer);
+      const cloned = cloneBlock(blocksContainer);
       Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
+
+      const customerId = String(customerSel?.value || "").trim();
+      const defaultRateCode = getCustomerDefaultLaborRate(customersData, customerId);
+      applyDefaultLaborRateToBlock(cloned, defaultRateCode, true);
+
       recalcAll(blocksContainer, pricing, laborRates);
     });
 
@@ -910,6 +985,16 @@
     });
 
     // initial state
+    if (addUnitBtn) {
+      const initialCustomerId = String(customerSel?.value || "").trim();
+      addUnitBtn.disabled = !initialCustomerId;
+    }
+
+    const initialCustomerId = String(customerSel?.value || "").trim();
+    const initialDefaultRateCode = getCustomerDefaultLaborRate(customersData, initialCustomerId);
+    applyDefaultLaborRateToAll(blocksContainer, initialDefaultRateCode, true);
+    recalcAll(blocksContainer, pricing, laborRates);
+
     applyStateFromStatus();
   });
 })();

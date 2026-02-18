@@ -107,7 +107,14 @@ def get_customers(shop_db):
             [("company_name", 1), ("last_name", 1), ("first_name", 1)]
         )
     )
-    return [{"id": str(x["_id"]), "label": customer_label(x)} for x in rows]
+    return [
+        {
+            "id": str(x["_id"]),
+            "label": customer_label(x),
+            "default_labor_rate": (x.get("default_labor_rate") or "").strip(),
+        }
+        for x in rows
+    ]
 
 
 def get_units(shop_db, customer_id: ObjectId):
