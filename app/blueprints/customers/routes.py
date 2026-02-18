@@ -139,6 +139,7 @@ def customers_create():
         "phone": phone or None,
         "email": email or None,
         "address": address or None,
+        "default_labor_rate": "Standart",
 
         "is_active": True,
 
