@@ -663,10 +663,10 @@
     if (isEditing) {
       editor.style.pointerEvents = "";
       editor.style.opacity = "";
-      // customer/unit НЕ даём менять уже созданный ордер
-      if (customerSel) customerSel.disabled = true;
-      if (unitSel) unitSel.disabled = true;
-      if (addUnitBtn) addUnitBtn.disabled = true;
+      // При редактировании разрешаем менять customer/unit
+      if (customerSel) customerSel.disabled = false;
+      if (unitSel) unitSel.disabled = false;
+      if (addUnitBtn) addUnitBtn.disabled = false;
       if (addLaborBtn) addLaborBtn.disabled = false;
       document.querySelectorAll(".removeLaborBtn").forEach(b => { b.disabled = false; });
     } else {
