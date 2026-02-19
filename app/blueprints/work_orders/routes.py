@@ -82,6 +82,76 @@ def normalize_totals_payload(raw):
     }
 
 
+def normalize_saved_labors(raw):
+    if not isinstance(raw, list):
+        return []
+
+    out = []
+    for block in raw:
+        if not isinstance(block, dict):
+            continue
+
+        labor_src = block.get("labor") if isinstance(block.get("labor"), dict) else {}
+
+        labor_description = str(
+            labor_src.get("description")
+            if labor_src.get("description") is not None
+            else block.get("labor_description")
+            or ""
+        ).strip()
+
+        labor_hours = str(
+            labor_src.get("hours")
+            if labor_src.get("hours") is not None
+            else block.get("labor_hours")
+            or ""
+        ).strip()
+
+        labor_rate_code = str(
+            labor_src.get("rate_code")
+            if labor_src.get("rate_code") is not None
+            else block.get("labor_rate_code")
+            or ""
+        ).strip()
+
+        parts_out = []
+        for p in (block.get("parts") or []):
+            if not isinstance(p, dict):
+                continue
+
+            part_number = str(p.get("part_number") or "").strip()
+            description = str(p.get("description") or "").strip()
+            qty = str(p.get("qty") if p.get("qty") is not None else "").strip()
+            cost = str(p.get("cost") if p.get("cost") is not None else "").strip()
+            price = str(p.get("price") if p.get("price") is not None else "").strip()
+
+            if not (part_number or description or qty or cost or price):
+                continue
+
+            parts_out.append(
+                {
+                    "part_number": part_number,
+                    "description": description,
+                    "qty": qty,
+                    "cost": cost,
+                    "price": price,
+                }
+            )
+
+        out.append(
+            {
+                "labor": {
+                    "description": labor_description,
+                    "hours": labor_hours,
+                    "rate_code": labor_rate_code,
+                },
+                "parts": parts_out,
+            }
+        )
+
+    return out
+
+
 def format_dt_label(dt):
     if isinstance(dt, datetime):
         try:
@@ -300,6 +370,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "created_work_order_id": (form_state or {}).get("created_work_order_id") or "",
 
         "draft_labors": (form_state or {}).get("draft_labors") or (form_state or {}).get("draft_blocks") or [],
+        "draft_totals": normalize_totals_payload((form_state or {}).get("draft_totals") or {}),
         "work_order_status": (form_state or {}).get("work_order_status") or "open",
     }
 
@@ -334,6 +405,39 @@ def work_order_details_page():
 
     customer_id = oid(request.args.get("customer_id"))
     unit_id = oid(request.args.get("unit_id"))
+
+    work_order_id = oid(request.args.get("work_order_id"))
+    if work_order_id:
+        wo = shop_db.work_orders.find_one({"_id": work_order_id, "shop_id": shop["_id"], "is_active": True})
+        if not wo:
+            flash("Work order not found.", "error")
+            return redirect(url_for("work_orders.work_orders_page"))
+
+        customer_id = wo.get("customer_id")
+        unit_id = wo.get("unit_id")
+        work_order_status = (wo.get("status") or "open").strip().lower()
+        if work_order_status not in ("open", "paid"):
+            work_order_status = "open"
+
+        return render_details(
+            shop_db,
+            shop,
+            customer_id,
+            unit_id,
+            form_state={
+                "work_order_created": True,
+                "created_work_order_id": str(wo.get("_id")),
+                "draft_labors": normalize_saved_labors(wo.get("labors") or wo.get("blocks") or []),
+                "draft_totals": wo.get("totals")
+                or {
+                    "labor_total": wo.get("labor_total") or 0,
+                    "parts_total": wo.get("parts_total") or 0,
+                    "grand_total": wo.get("grand_total") or 0,
+                    "labors": [],
+                },
+                "work_order_status": work_order_status,
+            },
+        )
 
     return render_details(shop_db, shop, customer_id, unit_id)
 
@@ -539,6 +643,7 @@ def preview_work_order():
                 "work_order_created": True,
                 "created_work_order_id": str(res.inserted_id),
                 "draft_labors": labors,
+                "draft_totals": totals,
                 "work_order_status": "open",
             },
         )

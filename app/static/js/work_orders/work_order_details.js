@@ -339,6 +339,38 @@
     };
   }
 
+  function applyTotalsSnapshotToUi(blocksContainer, totals) {
+    if (!totals || typeof totals !== "object" || !blocksContainer) return;
+
+    const blockTotals = Array.isArray(totals.labors) ? totals.labors : [];
+    const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
+
+    blocks.forEach((bEl, idx) => {
+      const bt = blockTotals[idx] || {};
+      const labor = toNum(bt.labor_total);
+      const parts = toNum(bt.parts_total);
+      if (labor === null && parts === null) return;
+      setBlockTotalsUI(
+        bEl,
+        Number.isFinite(labor) ? round2(labor) : null,
+        Number.isFinite(parts) ? round2(parts) : null,
+      );
+    });
+
+    const laborGrand = toNum(totals.labor_total);
+    const partsGrand = toNum(totals.parts_total);
+    const grand = toNum(totals.grand_total);
+
+    const laborGrandEl = $("laborGrandTotalDisplay");
+    if (laborGrandEl && Number.isFinite(laborGrand)) laborGrandEl.textContent = `$${money(round2(laborGrand))}`;
+
+    const partsGrandEl = $("partsGrandTotalDisplay");
+    if (partsGrandEl && Number.isFinite(partsGrand)) partsGrandEl.textContent = `$${money(round2(partsGrand))}`;
+
+    const grandEl = $("grandTotalDisplay");
+    if (grandEl && Number.isFinite(grand)) grandEl.textContent = `$${money(round2(grand))}`;
+  }
+
   function upsertHiddenJsonInput(formEl, name, obj) {
     if (!formEl) return;
     let input = formEl.querySelector(`input[name="${CSS.escape(name)}"]`);
@@ -751,6 +783,7 @@
     const customersData = readJsonScript("customersData", []);
     const laborRates = readJsonScript("laborRatesData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
+    const totalsSnapshot = readJsonScript("workOrderTotalsData", {});
 
     const blocksContainer = $("laborsContainer");
     if (!blocksContainer) return;
@@ -1020,6 +1053,10 @@
     const initialDefaultRateCode = getCustomerDefaultLaborRate(customersData, initialCustomerId);
     applyDefaultLaborRateToAll(blocksContainer, initialDefaultRateCode, true);
     recalcAll(blocksContainer, pricing, laborRates);
+
+    if (isCreated) {
+      applyTotalsSnapshotToUi(blocksContainer, totalsSnapshot);
+    }
 
     applyStateFromStatus();
   });

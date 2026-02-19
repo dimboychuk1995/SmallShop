@@ -32,6 +32,7 @@
               <th class="text-end">Parts</th>
               <th class="text-end">Total</th>
               <th class="text-center">Paid</th>
+              <th class="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -49,6 +50,11 @@
                   {% else %}
                     <span class="badge bg-warning text-dark">Unpaid</span>
                   {% endif %}
+                </td>
+                <td class="text-end">
+                  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('work_orders.work_order_details_page', work_order_id=w.id) }}">
+                    Edit
+                  </a>
                 </td>
               </tr>
             {% endfor %}
