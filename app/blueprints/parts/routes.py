@@ -265,6 +265,8 @@ def parts_create():
 
     in_stock_raw = (request.form.get("in_stock") or "").strip()
     avg_cost_raw = (request.form.get("average_cost") or "").strip()
+    core_has_charge_raw = (request.form.get("core_has_charge") or "").strip()
+    core_cost_raw = (request.form.get("core_cost") or "").strip()
 
     if not part_number:
         flash("Part number is required.", "error")
@@ -278,6 +280,12 @@ def parts_create():
     average_cost = _parse_float(avg_cost_raw, default=0.0)
     if average_cost < 0:
         flash("Average cost cannot be negative.", "error")
+        return redirect(url_for("parts.parts_page"))
+
+    core_has_charge = core_has_charge_raw == "1"
+    core_cost = _parse_float(core_cost_raw, default=0.0)
+    if core_has_charge and core_cost < 0:
+        flash("Core cost cannot be negative.", "error")
         return redirect(url_for("parts.parts_page"))
 
     # ✅ PyMongo Collection нельзя проверять через bool()
@@ -322,6 +330,8 @@ def parts_create():
 
         "in_stock": in_stock,
         "average_cost": float(average_cost),
+        "core_has_charge": bool(core_has_charge),
+        "core_cost": float(core_cost) if core_has_charge else None,
 
         "is_active": True,
 
@@ -595,7 +605,7 @@ def parts_api_orders_receive(order_id: str):
 
 @parts_bp.post("/<part_id>/deactivate")
 @login_required
-@permission_required("parts.deactivate")
+@permission_required("parts.edit")
 def parts_deactivate(part_id: str):
     """
     Удаление запчасти = деактивация (soft delete).
