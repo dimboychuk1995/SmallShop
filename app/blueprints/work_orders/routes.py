@@ -36,6 +36,52 @@ def i32(v):
         return None
 
 
+def f64(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def round2(v):
+    n = f64(v)
+    if n is None:
+        return 0.0
+    return round(n + 1e-12, 2)
+
+
+def normalize_totals_payload(raw):
+    src = raw if isinstance(raw, dict) else {}
+
+    blocks = []
+    for b in (src.get("labors") or []):
+        if not isinstance(b, dict):
+            continue
+        labor_total = round2(b.get("labor_total"))
+        parts_total = round2(b.get("parts_total"))
+        labor_full_total = round2(b.get("labor_full_total"))
+        blocks.append(
+            {
+                "labor_total": labor_total,
+                "parts_total": parts_total,
+                "labor_full_total": labor_full_total,
+            }
+        )
+
+    labor_total = round2(src.get("labor_total"))
+    parts_total = round2(src.get("parts_total"))
+    grand_total = round2(src.get("grand_total"))
+
+    return {
+        "labor_total": labor_total,
+        "parts_total": parts_total,
+        "grand_total": grand_total,
+        "labors": blocks,
+    }
+
+
 def current_user_id():
     return oid(session.get(SESSION_USER_ID))
 
@@ -391,6 +437,8 @@ def preview_work_order():
         except Exception:
             totals = {}
 
+    totals = normalize_totals_payload(totals)
+
     now = utcnow()
     user_id = current_user_id()
 
@@ -405,6 +453,9 @@ def preview_work_order():
 
             # ✅ store totals from UI
             "totals": totals,
+            "labor_total": totals.get("labor_total", 0.0),
+            "parts_total": totals.get("parts_total", 0.0),
+            "grand_total": totals.get("grand_total", 0.0),
 
             "is_active": True,
             "created_at": now,
@@ -580,13 +631,10 @@ def api_work_order_update(work_order_id):
 
     data = request.get_json(silent=True) or {}
     labors = data.get("labors", data.get("blocks"))
-    totals = data.get("totals") or {}
+    totals = normalize_totals_payload(data.get("totals") or {})
 
     if not isinstance(labors, list):
         return jsonify({"ok": False, "error": "labors_required"}), 200
-
-    if totals is not None and not isinstance(totals, dict):
-        totals = {}
 
     # (опционально) можно запретить редактирование, если paid
     if (wo.get("status") or "open") == "paid":
@@ -601,6 +649,9 @@ def api_work_order_update(work_order_id):
             "$set": {
                 "labors": labors,
                 "totals": totals,  # ✅ сохраняем totals от фронта
+                "labor_total": totals.get("labor_total", 0.0),
+                "parts_total": totals.get("parts_total", 0.0),
+                "grand_total": totals.get("grand_total", 0.0),
                 "updated_at": now,
                 "updated_by": user_id,
             },

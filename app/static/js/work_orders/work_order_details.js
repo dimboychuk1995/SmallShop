@@ -254,14 +254,35 @@
     const laborTotal = calcLaborTotal(blockEl, laborRates);
     const partsTotal = calcPartsTotal(blockEl, pricing);
     setBlockTotalsUI(blockEl, laborTotal, partsTotal);
-    return (Number.isFinite(laborTotal) ? laborTotal : 0) + (Number.isFinite(partsTotal) ? partsTotal : 0);
+    const labor = Number.isFinite(laborTotal) ? laborTotal : 0;
+    const parts = Number.isFinite(partsTotal) ? partsTotal : 0;
+    return {
+      labor,
+      parts,
+      total: round2(labor + parts),
+    };
   }
 
   function recalcAll(blocksContainer, pricing, laborRates) {
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
+    let laborGrand = 0;
+    let partsGrand = 0;
     let grand = 0;
-    for (const b of blocks) grand += recalcBlock(b, pricing, laborRates);
+    for (const b of blocks) {
+      const totals = recalcBlock(b, pricing, laborRates);
+      laborGrand += totals.labor;
+      partsGrand += totals.parts;
+      grand += totals.total;
+    }
+    laborGrand = round2(laborGrand);
+    partsGrand = round2(partsGrand);
     grand = round2(grand);
+
+    const laborGrandEl = $("laborGrandTotalDisplay");
+    if (laborGrandEl) laborGrandEl.textContent = blocks.length ? `$${money(laborGrand)}` : "—";
+
+    const partsGrandEl = $("partsGrandTotalDisplay");
+    if (partsGrandEl) partsGrandEl.textContent = blocks.length ? `$${money(partsGrand)}` : "—";
 
     const grandEl = $("grandTotalDisplay");
     if (grandEl) grandEl.textContent = blocks.length ? `$${money(grand)}` : "—";
