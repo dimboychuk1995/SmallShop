@@ -209,6 +209,33 @@
               <input name="core_cost" type="number" min="0" step="0.01" value="0" class="form-control" />
             </div>
 
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="miscChargeToggle" name="misc_has_charge" value="1">
+                <label class="form-check-label" for="miscChargeToggle">Add Misc charge for this part</label>
+              </div>
+            </div>
+
+            <div class="col-12" id="miscChargesGroup" style="display:none;">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <div class="text-muted small">Misc charges</div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="addMiscChargeBtn">+ Add charge</button>
+              </div>
+
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th class="text-end" style="width:160px;">Price</th>
+                      <th class="text-end" style="width:80px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="miscChargesBody"></tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         </div>
 

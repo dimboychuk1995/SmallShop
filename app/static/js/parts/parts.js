@@ -5,6 +5,10 @@
 	document.addEventListener("DOMContentLoaded", function () {
 		const toggle = document.getElementById("coreChargeToggle");
 		const group = document.getElementById("coreCostGroup");
+			const miscToggle = document.getElementById("miscChargeToggle");
+			const miscGroup = document.getElementById("miscChargesGroup");
+			const miscBody = document.getElementById("miscChargesBody");
+			const addMiscBtn = document.getElementById("addMiscChargeBtn");
 
 		if (toggle && group) {
 			const syncCoreUi = () => {
@@ -14,6 +18,70 @@
 			toggle.addEventListener("change", syncCoreUi);
 			syncCoreUi();
 		}
+
+			function buildMiscRow(idx, desc, price) {
+				const tr = document.createElement("tr");
+				tr.dataset.index = String(idx);
+				tr.innerHTML = `
+					<td>
+						<input class="form-control form-control-sm misc-desc" name="misc_charges[${idx}][description]" value="${desc || ""}" maxlength="200" />
+					</td>
+					<td class="text-end">
+						<input class="form-control form-control-sm text-end misc-price" name="misc_charges[${idx}][price]" type="number" min="0" step="0.01" value="${price || ""}" />
+					</td>
+					<td class="text-end">
+						<button type="button" class="btn btn-sm btn-outline-danger remove-misc-btn">Remove</button>
+					</td>
+				`;
+				return tr;
+			}
+
+			function renumberMiscRows() {
+				if (!miscBody) return;
+				const rows = Array.from(miscBody.querySelectorAll("tr"));
+				rows.forEach((tr, idx) => {
+					tr.dataset.index = String(idx);
+					const desc = tr.querySelector(".misc-desc");
+					const price = tr.querySelector(".misc-price");
+					if (desc) desc.name = `misc_charges[${idx}][description]`;
+					if (price) price.name = `misc_charges[${idx}][price]`;
+				});
+			}
+
+			function addMiscRow() {
+				if (!miscBody) return;
+				const idx = miscBody.querySelectorAll("tr").length;
+				miscBody.appendChild(buildMiscRow(idx));
+			}
+
+			function clearMiscRows() {
+				if (!miscBody) return;
+				miscBody.innerHTML = "";
+			}
+
+			function syncMiscUi() {
+				if (!miscToggle || !miscGroup) return;
+				miscGroup.style.display = miscToggle.checked ? "" : "none";
+				if (miscToggle.checked && miscBody && miscBody.querySelectorAll("tr").length === 0) {
+					addMiscRow();
+				}
+				if (!miscToggle.checked) {
+					clearMiscRows();
+				}
+			}
+
+			if (miscToggle && miscGroup && miscBody && addMiscBtn) {
+				miscToggle.addEventListener("change", syncMiscUi);
+				addMiscBtn.addEventListener("click", addMiscRow);
+				miscBody.addEventListener("click", function (e) {
+					const btn = e.target.closest(".remove-misc-btn");
+					if (!btn) return;
+					const tr = btn.closest("tr");
+					if (tr) tr.remove();
+					renumberMiscRows();
+				});
+				syncMiscUi();
+			}
 
 		const vendorSelect = document.getElementById("order_vendor");
 		const partSearch = document.getElementById("partSearch");
@@ -26,7 +94,7 @@
 		const orderCreatedBox = document.getElementById("orderCreatedBox");
 		const orderAlert = document.getElementById("orderAlert");
 
-		if (!vendorSelect || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !receiveBtn || !createdOrderId || !orderCreatedBox || !orderAlert) {
+			if (!vendorSelect || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !receiveBtn || !createdOrderId || !orderCreatedBox || !orderAlert) {
 			return;
 		}
 

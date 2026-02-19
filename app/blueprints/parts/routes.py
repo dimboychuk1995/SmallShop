@@ -267,6 +267,7 @@ def parts_create():
     avg_cost_raw = (request.form.get("average_cost") or "").strip()
     core_has_charge_raw = (request.form.get("core_has_charge") or "").strip()
     core_cost_raw = (request.form.get("core_cost") or "").strip()
+    misc_has_charge_raw = (request.form.get("misc_has_charge") or "").strip()
 
     if not part_number:
         flash("Part number is required.", "error")
@@ -287,6 +288,45 @@ def parts_create():
     if core_has_charge and core_cost < 0:
         flash("Core cost cannot be negative.", "error")
         return redirect(url_for("parts.parts_page"))
+
+    misc_has_charge = misc_has_charge_raw == "1"
+    misc_charges = []
+    if misc_has_charge:
+        import re
+
+        misc_re = re.compile(r"^misc_charges\[(\d+)\]\[(description|price)\]$")
+        misc_map: dict[int, dict] = {}
+
+        for key, val in request.form.items():
+            m = misc_re.match(key)
+            if not m:
+                continue
+
+            idx = int(m.group(1))
+            field = m.group(2)
+            item = misc_map.setdefault(idx, {})
+
+            if field == "description":
+                item["description"] = (val or "").strip()
+            elif field == "price":
+                item["price"] = (val or "").strip()
+
+        for idx in sorted(misc_map.keys()):
+            item = misc_map[idx]
+            desc = (item.get("description") or "").strip()
+            price_raw = (item.get("price") or "").strip()
+            if not (desc or price_raw):
+                continue
+
+            price = _parse_float(price_raw, default=0.0)
+            if price < 0:
+                flash("Misc charge price cannot be negative.", "error")
+                return redirect(url_for("parts.parts_page"))
+
+            misc_charges.append({
+                "description": desc,
+                "price": float(price),
+            })
 
     # ✅ PyMongo Collection нельзя проверять через bool()
     vendor_oid, err = (
@@ -332,6 +372,8 @@ def parts_create():
         "average_cost": float(average_cost),
         "core_has_charge": bool(core_has_charge),
         "core_cost": float(core_cost) if core_has_charge else None,
+        "misc_has_charge": bool(misc_has_charge),
+        "misc_charges": misc_charges if misc_has_charge else [],
 
         "is_active": True,
 
