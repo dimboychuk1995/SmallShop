@@ -17,4 +17,47 @@
     </div>
   </div>
 </div>
+
+<div class="card mt-3">
+  <div class="card-body">
+    {% if work_orders and work_orders|length > 0 %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Date</th>
+              <th>Unit</th>
+              <th class="text-end">Labor</th>
+              <th class="text-end">Parts</th>
+              <th class="text-end">Total</th>
+              <th class="text-center">Paid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for w in work_orders %}
+              <tr>
+                <td>{{ w.customer }}</td>
+                <td>{{ w.date }}</td>
+                <td>{{ w.unit }}</td>
+                <td class="text-end">${{ "%.2f"|format(w.labor_total) }}</td>
+                <td class="text-end">${{ "%.2f"|format(w.parts_total) }}</td>
+                <td class="text-end fw-semibold">${{ "%.2f"|format(w.grand_total) }}</td>
+                <td class="text-center">
+                  {% if w.is_paid %}
+                    <span class="badge bg-success">Paid</span>
+                  {% else %}
+                    <span class="badge bg-warning text-dark">Unpaid</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">No work orders yet.</div>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

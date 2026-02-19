@@ -82,6 +82,59 @@ def normalize_totals_payload(raw):
     }
 
 
+def format_dt_label(dt):
+    if isinstance(dt, datetime):
+        try:
+            return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return dt.strftime("%Y-%m-%d %H:%M")
+    return "-"
+
+
+def get_work_orders_list(shop_db, shop_id: ObjectId):
+    rows = list(
+        shop_db.work_orders.find({"shop_id": shop_id, "is_active": True}).sort([("created_at", -1)]).limit(500)
+    )
+
+    customer_ids = [x.get("customer_id") for x in rows if x.get("customer_id")]
+    unit_ids = [x.get("unit_id") for x in rows if x.get("unit_id")]
+
+    customers_map = {}
+    if customer_ids:
+        for c in shop_db.customers.find({"_id": {"$in": customer_ids}}):
+            customers_map[c.get("_id")] = customer_label(c)
+
+    units_map = {}
+    if unit_ids:
+        for u in shop_db.units.find({"_id": {"$in": unit_ids}}):
+            units_map[u.get("_id")] = unit_label(u)
+
+    items = []
+    for x in rows:
+        totals = x.get("totals") if isinstance(x.get("totals"), dict) else {}
+
+        labor_total = round2(x.get("labor_total") if x.get("labor_total") is not None else totals.get("labor_total"))
+        parts_total = round2(x.get("parts_total") if x.get("parts_total") is not None else totals.get("parts_total"))
+        grand_total = round2(x.get("grand_total") if x.get("grand_total") is not None else totals.get("grand_total"))
+
+        status = (x.get("status") or "open").strip().lower()
+
+        items.append(
+            {
+                "id": str(x.get("_id")),
+                "customer": customers_map.get(x.get("customer_id")) or "-",
+                "date": format_dt_label(x.get("created_at")),
+                "unit": units_map.get(x.get("unit_id")) or "-",
+                "labor_total": labor_total,
+                "parts_total": parts_total,
+                "grand_total": grand_total,
+                "is_paid": status == "paid",
+            }
+        )
+
+    return items
+
+
 def current_user_id():
     return oid(session.get(SESSION_USER_ID))
 
@@ -257,7 +310,17 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
 @login_required
 @permission_required("work_orders.view")
 def work_orders_page():
-    return _render_app_page("public/work_orders/work_orders.html", active_page="work_orders")
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        flash("Shop database not configured.", "error")
+        return redirect(url_for("main.dashboard"))
+
+    work_orders = get_work_orders_list(shop_db, shop["_id"])
+    return _render_app_page(
+        "public/work_orders/work_orders.html",
+        active_page="work_orders",
+        work_orders=work_orders,
+    )
 
 
 @work_orders_bp.get("/work_orders/details")
