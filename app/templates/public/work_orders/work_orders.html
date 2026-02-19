@@ -48,7 +48,15 @@
                   {% if w.is_paid %}
                     <span class="badge bg-success">Paid</span>
                   {% else %}
-                    <span class="badge bg-warning text-dark">Unpaid</span>
+                    <button
+                      type="button"
+                      class="badge bg-warning text-dark border-0 js-mark-paid"
+                      data-work-order-id="{{ w.id }}"
+                      title="Click to mark as paid"
+                      style="cursor:pointer;"
+                    >
+                      Unpaid
+                    </button>
                   {% endif %}
                 </td>
                 <td class="text-end">
@@ -66,4 +74,53 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+  (function () {
+    "use strict";
+
+    async function postJson(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+
+      if (!res.ok || !data || data.ok !== true) {
+        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : "Failed to update status.";
+        throw new Error(msg);
+      }
+
+      return data;
+    }
+
+    document.addEventListener("click", async function (e) {
+      const btn = e.target.closest(".js-mark-paid");
+      if (!btn) return;
+
+      const workOrderId = String(btn.dataset.workOrderId || "").trim();
+      if (!workOrderId) return;
+
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+
+      try {
+        await postJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/status`, { status: "paid" });
+
+        const td = btn.closest("td");
+        if (td) {
+          td.innerHTML = '<span class="badge bg-success">Paid</span>';
+        }
+      } catch (err) {
+        alert(err.message || "Failed to set paid.");
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+  })();
+</script>
 {% endblock %}
