@@ -61,22 +61,30 @@ def normalize_totals_payload(raw):
             continue
         labor_total = round2(b.get("labor_total"))
         parts_total = round2(b.get("parts_total"))
+        core_total = round2(b.get("core_total"))
+        misc_total = round2(b.get("misc_total"))
         labor_full_total = round2(b.get("labor_full_total"))
         blocks.append(
             {
                 "labor_total": labor_total,
                 "parts_total": parts_total,
+                "core_total": core_total,
+                "misc_total": misc_total,
                 "labor_full_total": labor_full_total,
             }
         )
 
     labor_total = round2(src.get("labor_total"))
     parts_total = round2(src.get("parts_total"))
+    core_total = round2(src.get("core_total"))
+    misc_total = round2(src.get("misc_total"))
     grand_total = round2(src.get("grand_total"))
 
     return {
         "labor_total": labor_total,
         "parts_total": parts_total,
+        "core_total": core_total,
+        "misc_total": misc_total,
         "grand_total": grand_total,
         "labors": blocks,
     }
@@ -124,8 +132,14 @@ def normalize_saved_labors(raw):
             qty = str(p.get("qty") if p.get("qty") is not None else "").strip()
             cost = str(p.get("cost") if p.get("cost") is not None else "").strip()
             price = str(p.get("price") if p.get("price") is not None else "").strip()
+            core_charge = str(
+                p.get("core_charge")
+                if p.get("core_charge") is not None
+                else (p.get("core_cost") if p.get("core_cost") is not None else "")
+            ).strip()
+            misc_charge = str(p.get("misc_charge") if p.get("misc_charge") is not None else "").strip()
 
-            if not (part_number or description or qty or cost or price):
+            if not (part_number or description or qty or cost or price or core_charge or misc_charge):
                 continue
 
             parts_out.append(
@@ -135,6 +149,8 @@ def normalize_saved_labors(raw):
                     "qty": qty,
                     "cost": cost,
                     "price": price,
+                    "core_charge": core_charge,
+                    "misc_charge": misc_charge,
                 }
             )
 
@@ -523,7 +539,9 @@ def preview_work_order():
     # labor
     labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
     # parts
-    parts_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price)\]$")
+    parts_re = re.compile(
+        r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price|core_charge|misc_charge)\]$"
+    )
 
     for key, val in request.form.items():
         m = labor_re.match(key)
@@ -558,6 +576,10 @@ def preview_work_order():
                 b["parts"][ridx]["cost"] = (val or "").strip()
             elif field == "price":
                 b["parts"][ridx]["price"] = (val or "").strip()
+            elif field == "core_charge":
+                b["parts"][ridx]["core_charge"] = (val or "").strip()
+            elif field == "misc_charge":
+                b["parts"][ridx]["misc_charge"] = (val or "").strip()
             continue
 
     # normalize labors list in order
@@ -573,7 +595,9 @@ def preview_work_order():
             qty = (p.get("qty") or "").strip()
             cost = (p.get("cost") or "").strip()
             price = (p.get("price") or "").strip()
-            if not (pn or ds or qty or cost or price):
+            core_charge = (p.get("core_charge") or p.get("core_cost") or "").strip()
+            misc_charge = (p.get("misc_charge") or "").strip()
+            if not (pn or ds or qty or cost or price or core_charge or misc_charge):
                 continue
             parts_clean.append({
                 "part_number": pn,
@@ -581,6 +605,8 @@ def preview_work_order():
                 "qty": qty,
                 "cost": cost,
                 "price": price,
+                "core_charge": core_charge,
+                "misc_charge": misc_charge,
             })
 
         labor = b.get("labor") or {}
@@ -711,12 +737,25 @@ def api_parts_search():
         "reference": 1,
         "average_cost": 1,
         "in_stock": 1,
+        "core_has_charge": 1,
+        "core_cost": 1,
+        "misc_has_charge": 1,
+        "misc_charges": 1,
     }
 
     cursor = parts_col.find(query, projection).sort([("part_number", 1)]).limit(limit)
 
     items = []
     for p in cursor:
+        misc_items = []
+        for m in (p.get("misc_charges") or []):
+            if not isinstance(m, dict):
+                continue
+            misc_items.append({
+                "description": str(m.get("description") or "").strip(),
+                "price": float(m.get("price") or 0),
+            })
+
         items.append({
             "id": str(p.get("_id")),
             "part_number": p.get("part_number") or "",
@@ -724,6 +763,10 @@ def api_parts_search():
             "reference": p.get("reference") or "",
             "average_cost": float(p.get("average_cost") or 0),
             "in_stock": int(p.get("in_stock") or 0),
+            "core_has_charge": bool(p.get("core_has_charge")),
+            "core_cost": float(p.get("core_cost") or 0),
+            "misc_has_charge": bool(p.get("misc_has_charge")),
+            "misc_charges": misc_items,
         })
 
     return jsonify({"items": items}), 200

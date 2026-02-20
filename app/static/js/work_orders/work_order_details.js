@@ -142,10 +142,17 @@
     tr.dataset.index = String(rowIndex);
 
     tr.innerHTML = `
-      <td><input class="form-control form-control-sm part-number" name="labors[${laborIndex}][parts][${rowIndex}][part_number]" maxlength="64" autocomplete="off"></td>
+      <td>
+        <input class="form-control form-control-sm part-number" name="labors[${laborIndex}][parts][${rowIndex}][part_number]" maxlength="64" autocomplete="off">
+        <input type="hidden" class="part-core-charge" name="labors[${laborIndex}][parts][${rowIndex}][core_charge]" value="0">
+        <input type="hidden" class="part-misc-charge" name="labors[${laborIndex}][parts][${rowIndex}][misc_charge]" value="0">
+      </td>
       <td><input class="form-control form-control-sm part-description" name="labors[${laborIndex}][parts][${rowIndex}][description]" maxlength="200" autocomplete="off"></td>
       <td><input class="form-control form-control-sm part-qty" name="labors[${laborIndex}][parts][${rowIndex}][qty]" inputmode="numeric"></td>
-      <td><input class="form-control form-control-sm part-cost" name="labors[${laborIndex}][parts][${rowIndex}][cost]" inputmode="decimal" readonly tabindex="-1"></td>
+      <td>
+        <input class="form-control form-control-sm part-cost" name="labors[${laborIndex}][parts][${rowIndex}][cost]" inputmode="decimal" readonly tabindex="-1">
+        <div class="small text-muted mt-1 part-charges-meta"></div>
+      </td>
       <td><input class="form-control form-control-sm part-price" name="labors[${laborIndex}][parts][${rowIndex}][price]" value="" inputmode="decimal"></td>
       <td class="part-line-total"><span class="text-muted">—</span></td>
     `;
@@ -158,12 +165,39 @@
     const q = tr.querySelector(".part-qty")?.value || "";
     const c = tr.querySelector(".part-cost")?.value || "";
     const p = tr.querySelector(".part-price")?.value || "";
-    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim() || String(p).trim());
+    const core = toNum(tr.querySelector(".part-core-charge")?.value);
+    const misc = toNum(tr.querySelector(".part-misc-charge")?.value);
+    const hasCharges = (Number.isFinite(core) && core > 0) || (Number.isFinite(misc) && misc > 0);
+    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim() || String(p).trim() || hasCharges);
+  }
+
+  function getRowCharges(tr) {
+    const coreRaw = toNum(tr.querySelector(".part-core-charge")?.value);
+    const miscRaw = toNum(tr.querySelector(".part-misc-charge")?.value);
+
+    const coreCharge = Number.isFinite(coreRaw) && coreRaw > 0 ? round2(coreRaw) : 0;
+    const miscCharge = Number.isFinite(miscRaw) && miscRaw > 0 ? round2(miscRaw) : 0;
+    return { coreCharge, miscCharge };
+  }
+
+  function setRowChargesMeta(tr) {
+    const metaEl = tr.querySelector(".part-charges-meta");
+    if (!metaEl) return;
+    const { coreCharge, miscCharge } = getRowCharges(tr);
+    if (coreCharge <= 0 && miscCharge <= 0) {
+      metaEl.textContent = "";
+      return;
+    }
+    const bits = [];
+    if (coreCharge > 0) bits.push(`Core: $${money(coreCharge)}`);
+    if (miscCharge > 0) bits.push(`Misc: $${money(miscCharge)}`);
+    metaEl.textContent = bits.join(" • ");
   }
 
   function clearRowCalc(tr) {
     const lineCell = tr.querySelector(".part-line-total");
     if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
+    setRowChargesMeta(tr);
   }
 
   function calcRowLineTotal(tr, pricing) {
@@ -171,6 +205,8 @@
     const cost = toNum(tr.querySelector(".part-cost")?.value);
     const priceInput = tr.querySelector(".part-price");
     const lineCell = tr.querySelector(".part-line-total");
+    const { coreCharge, miscCharge } = getRowCharges(tr);
+    setRowChargesMeta(tr);
 
     let price = toNum(priceInput?.value);
 
@@ -193,8 +229,15 @@
       return null;
     }
 
-    const lt = round2(price * qty);
-    if (lineCell) lineCell.innerHTML = `<strong>$${money(lt)}</strong>`;
+    const unitTotal = round2(price + coreCharge + miscCharge);
+    const lt = round2(unitTotal * qty);
+    if (lineCell) {
+      const chips = [];
+      if (coreCharge > 0) chips.push(`core $${money(coreCharge)}`);
+      if (miscCharge > 0) chips.push(`misc $${money(miscCharge)}`);
+      const meta = chips.length ? `<div class="small text-muted">+ ${chips.join(" • ")}</div>` : "";
+      lineCell.innerHTML = `<strong>$${money(lt)}</strong>${meta}`;
+    }
     return lt;
   }
 
@@ -216,9 +259,17 @@
 
   function calcPartsTotal(blockEl, pricing) {
     const tbody = blockEl.querySelector(".partsTbody");
-    if (!tbody) return null;
+    if (!tbody) {
+      return {
+        partsTotal: null,
+        coreTotal: 0,
+        miscTotal: 0,
+      };
+    }
 
     let total = 0;
+    let coreTotal = 0;
+    let miscTotal = 0;
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
 
     for (const tr of rows) {
@@ -228,20 +279,43 @@
       }
       const lt = calcRowLineTotal(tr, pricing);
       if (lt !== null && Number.isFinite(lt)) total += lt;
+
+      const qty = toNum(tr.querySelector(".part-qty")?.value);
+      const { coreCharge, miscCharge } = getRowCharges(tr);
+      if (qty !== null && qty > 0) {
+        coreTotal += round2(coreCharge * qty);
+        miscTotal += round2(miscCharge * qty);
+      }
     }
 
     total = round2(total);
-    return total > 0 ? total : null;
+    coreTotal = round2(coreTotal);
+    miscTotal = round2(miscTotal);
+    return {
+      partsTotal: total > 0 ? total : null,
+      coreTotal,
+      miscTotal,
+    };
   }
 
   // ---------------- totals per block + grand ----------------
-  function setBlockTotalsUI(blockEl, laborTotal, partsTotal) {
+  function setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal) {
     const laborEl = blockEl.querySelector(".laborTotalDisplay");
     const partsEl = blockEl.querySelector(".partsTotalDisplay");
+    const coreWrap = blockEl.querySelector(".coreTotalWrap");
+    const coreEl = blockEl.querySelector(".coreTotalDisplay");
+    const miscWrap = blockEl.querySelector(".miscTotalWrap");
+    const miscEl = blockEl.querySelector(".miscTotalDisplay");
     const blockElTotal = blockEl.querySelector(".laborFullTotalDisplay");
 
     if (laborEl) laborEl.textContent = Number.isFinite(laborTotal) ? `$${money(laborTotal)}` : "—";
     if (partsEl) partsEl.textContent = Number.isFinite(partsTotal) ? `$${money(partsTotal)}` : "—";
+    const hasCore = Number.isFinite(coreTotal) && coreTotal > 0;
+    const hasMisc = Number.isFinite(miscTotal) && miscTotal > 0;
+    if (coreWrap) coreWrap.style.display = hasCore ? "" : "none";
+    if (miscWrap) miscWrap.style.display = hasMisc ? "" : "none";
+    if (coreEl) coreEl.textContent = hasCore ? `$${money(coreTotal)}` : "—";
+    if (miscEl) miscEl.textContent = hasMisc ? `$${money(miscTotal)}` : "—";
 
     const sum = (Number.isFinite(laborTotal) ? laborTotal : 0) + (Number.isFinite(partsTotal) ? partsTotal : 0);
     if (blockElTotal) {
@@ -252,13 +326,20 @@
   function recalcBlock(blockEl, pricing, laborRates) {
     ensureTrailingEmptyRow(blockEl);
     const laborTotal = calcLaborTotal(blockEl, laborRates);
-    const partsTotal = calcPartsTotal(blockEl, pricing);
-    setBlockTotalsUI(blockEl, laborTotal, partsTotal);
+    const partsTotals = calcPartsTotal(blockEl, pricing);
+    const partsTotal = partsTotals.partsTotal;
+    const coreTotal = partsTotals.coreTotal;
+    const miscTotal = partsTotals.miscTotal;
+    setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal);
     const labor = Number.isFinite(laborTotal) ? laborTotal : 0;
     const parts = Number.isFinite(partsTotal) ? partsTotal : 0;
+    const core = Number.isFinite(coreTotal) ? coreTotal : 0;
+    const misc = Number.isFinite(miscTotal) ? miscTotal : 0;
     return {
       labor,
       parts,
+      core,
+      misc,
       total: round2(labor + parts),
     };
   }
@@ -267,15 +348,21 @@
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     let laborGrand = 0;
     let partsGrand = 0;
+    let coreGrand = 0;
+    let miscGrand = 0;
     let grand = 0;
     for (const b of blocks) {
       const totals = recalcBlock(b, pricing, laborRates);
       laborGrand += totals.labor;
       partsGrand += totals.parts;
+      coreGrand += totals.core;
+      miscGrand += totals.misc;
       grand += totals.total;
     }
     laborGrand = round2(laborGrand);
     partsGrand = round2(partsGrand);
+    coreGrand = round2(coreGrand);
+    miscGrand = round2(miscGrand);
     grand = round2(grand);
 
     const laborGrandEl = $("laborGrandTotalDisplay");
@@ -283,6 +370,18 @@
 
     const partsGrandEl = $("partsGrandTotalDisplay");
     if (partsGrandEl) partsGrandEl.textContent = blocks.length ? `$${money(partsGrand)}` : "—";
+
+    const coreGrandWrap = $("coreGrandTotalWrap");
+    const coreGrandEl = $("coreGrandTotalDisplay");
+    const hasCoreGrand = coreGrand > 0;
+    if (coreGrandWrap) coreGrandWrap.style.display = hasCoreGrand ? "" : "none";
+    if (coreGrandEl) coreGrandEl.textContent = hasCoreGrand ? `$${money(coreGrand)}` : "—";
+
+    const miscGrandWrap = $("miscGrandTotalWrap");
+    const miscGrandEl = $("miscGrandTotalDisplay");
+    const hasMiscGrand = miscGrand > 0;
+    if (miscGrandWrap) miscGrandWrap.style.display = hasMiscGrand ? "" : "none";
+    if (miscGrandEl) miscGrandEl.textContent = hasMiscGrand ? `$${money(miscGrand)}` : "—";
 
     const grandEl = $("grandTotalDisplay");
     if (grandEl) grandEl.textContent = blocks.length ? `$${money(grand)}` : "—";
@@ -304,24 +403,34 @@
 
     let laborSum = 0;
     let partsSum = 0;
+    let coreSum = 0;
+    let miscSum = 0;
     let grandSum = 0;
 
     blocks.forEach((bEl) => {
       const laborText = bEl.querySelector(".laborTotalDisplay")?.textContent || "0";
       const partsText = bEl.querySelector(".partsTotalDisplay")?.textContent || "0";
       const blockText = bEl.querySelector(".laborFullTotalDisplay")?.textContent || "0";
+      const coreText = bEl.querySelector(".coreTotalDisplay")?.textContent || "0";
+      const miscText = bEl.querySelector(".miscTotalDisplay")?.textContent || "0";
 
       const laborTotal = round2(parseMoneyText(laborText));
       const partsTotal = round2(parseMoneyText(partsText));
+      const coreTotal = round2(parseMoneyText(coreText));
+      const miscTotal = round2(parseMoneyText(miscText));
       const blockTotal = round2(parseMoneyText(blockText));
 
       laborSum += laborTotal;
       partsSum += partsTotal;
+      coreSum += coreTotal;
+      miscSum += miscTotal;
       grandSum += blockTotal;
 
       outBlocks.push({
         labor_total: laborTotal,
         parts_total: partsTotal,
+        core_total: coreTotal,
+        misc_total: miscTotal,
         labor_full_total: blockTotal,
       });
     });
@@ -334,6 +443,8 @@
     return {
       labor_total: round2(laborSum),
       parts_total: round2(partsSum),
+      core_total: round2(coreSum),
+      misc_total: round2(miscSum),
       grand_total: grandFinal,
       labors: outBlocks,
     };
@@ -349,16 +460,22 @@
       const bt = blockTotals[idx] || {};
       const labor = toNum(bt.labor_total);
       const parts = toNum(bt.parts_total);
-      if (labor === null && parts === null) return;
+      const core = toNum(bt.core_total);
+      const misc = toNum(bt.misc_total);
+      if (labor === null && parts === null && core === null && misc === null) return;
       setBlockTotalsUI(
         bEl,
         Number.isFinite(labor) ? round2(labor) : null,
         Number.isFinite(parts) ? round2(parts) : null,
+        Number.isFinite(core) ? round2(core) : 0,
+        Number.isFinite(misc) ? round2(misc) : 0,
       );
     });
 
     const laborGrand = toNum(totals.labor_total);
     const partsGrand = toNum(totals.parts_total);
+    const coreGrand = toNum(totals.core_total);
+    const miscGrand = toNum(totals.misc_total);
     const grand = toNum(totals.grand_total);
 
     const laborGrandEl = $("laborGrandTotalDisplay");
@@ -366,6 +483,18 @@
 
     const partsGrandEl = $("partsGrandTotalDisplay");
     if (partsGrandEl && Number.isFinite(partsGrand)) partsGrandEl.textContent = `$${money(round2(partsGrand))}`;
+
+    const coreGrandWrap = $("coreGrandTotalWrap");
+    const coreGrandEl = $("coreGrandTotalDisplay");
+    const hasCoreGrand = Number.isFinite(coreGrand) && coreGrand > 0;
+    if (coreGrandWrap) coreGrandWrap.style.display = hasCoreGrand ? "" : "none";
+    if (coreGrandEl) coreGrandEl.textContent = hasCoreGrand ? `$${money(round2(coreGrand))}` : "—";
+
+    const miscGrandWrap = $("miscGrandTotalWrap");
+    const miscGrandEl = $("miscGrandTotalDisplay");
+    const hasMiscGrand = Number.isFinite(miscGrand) && miscGrand > 0;
+    if (miscGrandWrap) miscGrandWrap.style.display = hasMiscGrand ? "" : "none";
+    if (miscGrandEl) miscGrandEl.textContent = hasMiscGrand ? `$${money(round2(miscGrand))}` : "—";
 
     const grandEl = $("grandTotalDisplay");
     if (grandEl && Number.isFinite(grand)) grandEl.textContent = `$${money(round2(grand))}`;
@@ -446,7 +575,14 @@
 
     dd.innerHTML = items.map((it, idx) => {
       const title = `${it.part_number || ""} — ${it.description || ""}`.trim();
-      const meta = `Stock: ${it.in_stock ?? 0} • Avg cost: $${money(toNum(it.average_cost) ?? 0)}`;
+      const coreCost = (it.core_has_charge && Number.isFinite(toNum(it.core_cost))) ? toNum(it.core_cost) : 0;
+      const miscCost = (it.misc_has_charge && Array.isArray(it.misc_charges))
+        ? round2(it.misc_charges.reduce((sum, ch) => sum + (toNum(ch?.price) || 0), 0))
+        : 0;
+      const chargesText = (coreCost > 0 || miscCost > 0)
+        ? ` • Charges: core $${money(coreCost)}${miscCost > 0 ? `, misc $${money(miscCost)}` : ""}`
+        : "";
+      const meta = `Stock: ${it.in_stock ?? 0} • Avg cost: $${money(toNum(it.average_cost) ?? 0)}${chargesText}`;
       return `
         <div class="parts-dd-item" data-idx="${idx}"
              style="padding:10px 12px; cursor:pointer; border-bottom:1px solid rgba(0,0,0,.06);">
@@ -469,6 +605,8 @@
     const pn = tr.querySelector(".part-number");
     const ds = tr.querySelector(".part-description");
     const cost = tr.querySelector(".part-cost");
+    const coreInput = tr.querySelector(".part-core-charge");
+    const miscInput = tr.querySelector(".part-misc-charge");
 
     if (pn) pn.value = part.part_number || "";
     if (ds) {
@@ -477,6 +615,17 @@
       ds.value = ref && ref !== d ? `${d} (${ref})` : d;
     }
     if (cost) cost.value = (part.average_cost != null) ? String(part.average_cost) : "";
+
+    const coreCharge = (part?.core_has_charge && Number.isFinite(toNum(part?.core_cost)))
+      ? Math.max(0, round2(toNum(part.core_cost)))
+      : 0;
+    const miscCharge = (part?.misc_has_charge && Array.isArray(part?.misc_charges))
+      ? Math.max(0, round2(part.misc_charges.reduce((sum, ch) => sum + (toNum(ch?.price) || 0), 0)))
+      : 0;
+
+    if (coreInput) coreInput.value = String(coreCharge);
+    if (miscInput) miscInput.value = String(miscCharge);
+    setRowChargesMeta(tr);
 
     const price = tr.querySelector(".part-price");
     if (price) price.value = "";
@@ -512,6 +661,8 @@
     rows.forEach((tr, rIdx) => {
       tr.dataset.index = String(rIdx);
       tr.querySelector(".part-number").name = `labors[${idx}][parts][${rIdx}][part_number]`;
+      tr.querySelector(".part-core-charge").name = `labors[${idx}][parts][${rIdx}][core_charge]`;
+      tr.querySelector(".part-misc-charge").name = `labors[${idx}][parts][${rIdx}][misc_charge]`;
       tr.querySelector(".part-description").name = `labors[${idx}][parts][${rIdx}][description]`;
       tr.querySelector(".part-qty").name = `labors[${idx}][parts][${rIdx}][qty]`;
       tr.querySelector(".part-cost").name = `labors[${idx}][parts][${rIdx}][cost]`;
@@ -526,6 +677,9 @@
 
     clone.querySelectorAll("input").forEach(i => {
       i.value = "";
+    });
+    clone.querySelectorAll(".part-core-charge, .part-misc-charge").forEach(i => {
+      i.value = "0";
     });
     clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
     clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .laborFullTotalDisplay").forEach(el => el.textContent = "—");
@@ -542,6 +696,19 @@
     blocksContainer.addEventListener("input", function (e) {
       const t = e.target;
       if (!t) return;
+
+      if (t.classList?.contains("part-number") || t.classList?.contains("part-description")) {
+        const tr = t.closest("tr.parts-row");
+        if (tr) {
+          const coreInput = tr.querySelector(".part-core-charge");
+          const miscInput = tr.querySelector(".part-misc-charge");
+          if (coreInput) coreInput.value = "0";
+          if (miscInput) miscInput.value = "0";
+          setRowChargesMeta(tr);
+          delete tr.dataset.priceAutofilled;
+        }
+      }
+
       const blockEl = t.closest(".wo-labor");
       if (!blockEl) return;
       recalcAll(blocksContainer, pricing, laborRates);
@@ -639,6 +806,9 @@
         tr.querySelector(".part-qty").value = String(p?.qty ?? "");
         tr.querySelector(".part-cost").value = String(p?.cost ?? "");
         tr.querySelector(".part-price").value = String(p?.price ?? "");
+        tr.querySelector(".part-core-charge").value = String(p?.core_charge ?? p?.core_cost ?? 0);
+        tr.querySelector(".part-misc-charge").value = String(p?.misc_charge ?? 0);
+        setRowChargesMeta(tr);
         if (String(p?.price ?? "").trim()) tr.dataset.priceAutofilled = "1";
         tbody.appendChild(tr);
       });
@@ -667,13 +837,17 @@
         const qty = String(tr.querySelector(".part-qty")?.value || "").trim();
         const cost = String(tr.querySelector(".part-cost")?.value || "").trim();
         const price = String(tr.querySelector(".part-price")?.value || "").trim();
-        if (!(part_number || description || qty || cost || price)) return;
+        const coreCharge = String(tr.querySelector(".part-core-charge")?.value || "").trim();
+        const miscCharge = String(tr.querySelector(".part-misc-charge")?.value || "").trim();
+        if (!(part_number || description || qty || cost || price || coreCharge || miscCharge)) return;
         parts.push({
           part_number,
           description,
           qty: qty === "" ? 0 : Number(qty),
           cost: cost === "" ? 0 : Number(cost),
           price: price === "" ? 0 : Number(price),
+          core_charge: coreCharge === "" ? 0 : Number(coreCharge),
+          misc_charge: miscCharge === "" ? 0 : Number(miscCharge),
         });
       });
 

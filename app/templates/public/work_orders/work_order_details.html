@@ -136,6 +136,8 @@
         <div class="d-flex flex-wrap gap-3 align-items-center mb-3 text-muted small">
           <div>Labor total: <strong id="laborGrandTotalDisplay">—</strong></div>
           <div>Parts total: <strong id="partsGrandTotalDisplay">—</strong></div>
+          <div id="coreGrandTotalWrap" style="display:none;">Core total: <strong id="coreGrandTotalDisplay">—</strong></div>
+          <div id="miscGrandTotalWrap" style="display:none;">Misc total: <strong id="miscGrandTotalDisplay">—</strong></div>
           <div>Grand total: <strong id="grandTotalDisplay">—</strong></div>
         </div>
 
@@ -157,6 +159,14 @@
                     Labor: <strong class="laborTotalDisplay">—</strong>
                     &nbsp;|&nbsp;
                     Parts: <strong class="partsTotalDisplay">—</strong>
+                    <span class="coreTotalWrap" style="display:none;">
+                      &nbsp;|&nbsp;
+                      Core: <strong class="coreTotalDisplay">—</strong>
+                    </span>
+                    <span class="miscTotalWrap" style="display:none;">
+                      &nbsp;|&nbsp;
+                      Misc: <strong class="miscTotalDisplay">—</strong>
+                    </span>
                     &nbsp;|&nbsp;
                     Labor total: <strong class="laborFullTotalDisplay">—</strong>
                   </div>
@@ -209,10 +219,17 @@
 
                     <tbody class="partsTbody">
                       <tr class="parts-row" data-index="0">
-                        <td><input class="form-control form-control-sm part-number" name="labors[0][parts][0][part_number]" maxlength="64" autocomplete="off"></td>
+                        <td>
+                          <input class="form-control form-control-sm part-number" name="labors[0][parts][0][part_number]" maxlength="64" autocomplete="off">
+                          <input type="hidden" class="part-core-charge" name="labors[0][parts][0][core_charge]" value="0">
+                          <input type="hidden" class="part-misc-charge" name="labors[0][parts][0][misc_charge]" value="0">
+                        </td>
                         <td><input class="form-control form-control-sm part-description" name="labors[0][parts][0][description]" maxlength="200" autocomplete="off"></td>
                         <td><input class="form-control form-control-sm part-qty" name="labors[0][parts][0][qty]" inputmode="numeric"></td>
-                        <td><input class="form-control form-control-sm part-cost" name="labors[0][parts][0][cost]" inputmode="decimal" readonly tabindex="-1"></td>
+                        <td>
+                          <input class="form-control form-control-sm part-cost" name="labors[0][parts][0][cost]" inputmode="decimal" readonly tabindex="-1">
+                          <div class="small text-muted mt-1 part-charges-meta"></div>
+                        </td>
                         <td><input class="form-control form-control-sm part-price" name="labors[0][parts][0][price]" value="" inputmode="decimal"></td>
                         <td class="part-line-total"><span class="text-muted">—</span></td>
                       </tr>
