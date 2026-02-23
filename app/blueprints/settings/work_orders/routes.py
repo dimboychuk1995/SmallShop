@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from flask import render_template, redirect, url_for, flash, session
+from datetime import datetime, timezone
+
+from flask import render_template, redirect, url_for, flash, session, request
 
 from app.blueprints.settings import settings_bp
-from app.extensions import get_master_db
-from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID
+from app.extensions import get_master_db, get_mongo_client
+from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID, SESSION_SHOP_ID
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 from app.utils.layout import build_app_layout_context
@@ -34,6 +36,29 @@ def _load_current_tenant(master):
     return master.tenants.find_one({"_id": tenant_id, "status": "active"})
 
 
+def _get_shop_db_strict(master):
+    client = get_mongo_client()
+
+    shop_id = _maybe_object_id(session.get(SESSION_SHOP_ID))
+    if not shop_id:
+        return None, None
+
+    shop = master.shops.find_one({"_id": shop_id})
+    if not shop:
+        return None, None
+
+    db_name = (
+        shop.get("db_name")
+        or shop.get("database")
+        or shop.get("mongo_db")
+        or shop.get("shop_db")
+    )
+    if not db_name:
+        return None, None
+
+    return client[str(db_name)], shop_id
+
+
 def _render_settings_page(template_name: str, **ctx):
     """
     Общий рендер для settings-страниц через единый layout builder.
@@ -49,7 +74,7 @@ def _render_settings_page(template_name: str, **ctx):
     return render_template(template_name, **layout)
 
 
-@settings_bp.route("/work_orders", methods=["GET"])
+@settings_bp.route("/work_orders", methods=["GET", "POST"])
 @login_required
 @permission_required("settings.manage_org")
 def work_orders_index():
@@ -62,4 +87,59 @@ def work_orders_index():
         session.clear()
         return redirect(url_for("main.index"))
 
-    return _render_settings_page("public/settings/work_orders.html")
+    sdb, shop_oid = _get_shop_db_strict(master)
+    if sdb is None or shop_oid is None:
+        flash("Please select an active shop first.", "error")
+        return redirect(url_for("main.settings"))
+
+    rules_col = sdb.shop_supply_amount_rules
+    existing = rules_col.find_one({"shop_id": shop_oid})
+
+    if request.method == "POST":
+        raw = (request.form.get("shop_supply_procentage") or "").strip()
+        try:
+            value = float(raw)
+        except Exception:
+            flash("Shop supply amount must be a number.", "error")
+            return redirect(url_for("settings.work_orders_index"))
+
+        now = datetime.now(timezone.utc)
+        rules_col.update_one(
+            {"shop_id": shop_oid},
+            {
+                "$set": {
+                    "shop_supply_procentage": value,
+                    "is_active": True,
+                    "updated_at": now,
+                },
+                "$setOnInsert": {
+                    "shop_id": shop_oid,
+                    "created_at": now,
+                },
+            },
+            upsert=True,
+        )
+        flash("Shop supply amount updated.", "success")
+        return redirect(url_for("settings.work_orders_index"))
+
+    if existing is None:
+        rules_col.update_one(
+            {"shop_id": shop_oid},
+            {
+                "$setOnInsert": {
+                    "shop_id": shop_oid,
+                    "shop_supply_procentage": 5,
+                    "is_active": True,
+                    "created_at": datetime.now(timezone.utc),
+                }
+            },
+            upsert=True,
+        )
+        existing = rules_col.find_one({"shop_id": shop_oid})
+
+    supply_value = existing.get("shop_supply_procentage") if isinstance(existing, dict) else 5
+
+    return _render_settings_page(
+        "public/settings/work_orders.html",
+        shop_supply_procentage=supply_value,
+    )
