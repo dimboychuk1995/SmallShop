@@ -191,13 +191,15 @@
       return parsed
         .map((x) => ({
           description: String(x?.description || "").trim(),
+          quantity: Number(x?.quantity || 1),
           price: toNum(x?.price),
+          manual: x?.manual === true,
         }))
         .filter((x) => x.description);
     } catch {
       return raw
         .split("|")
-        .map((x) => ({ description: String(x || "").trim(), price: null }))
+        .map((x) => ({ description: String(x || "").trim(), quantity: 1, price: null, manual: false }))
         .filter((x) => x.description);
     }
   }
@@ -320,6 +322,7 @@
           if (!Number.isFinite(item.price) || item.price <= 0) continue;
           hadPricedItems = true;
           const description = String(item.description || "").trim() || "Misc charge";
+          const itemQuantity = Number(item.quantity || 1);
           const unitPrice = round2(item.price);
           const key = `${description}__${unitPrice}`;
           const prev = miscBreakdownMap.get(key) || {
@@ -328,8 +331,11 @@
             count: 0,
             amount: 0,
           };
-          prev.count = round2(prev.count + qty);
-          prev.amount = round2(prev.amount + (unitPrice * qty));
+          // If manual charge, use its quantity directly
+          // If automatic charge (from part data), multiply by part qty
+          const effectiveQty = item.manual === true ? itemQuantity : (itemQuantity * qty);
+          prev.count = round2(prev.count + effectiveQty);
+          prev.amount = round2(prev.amount + (unitPrice * effectiveQty));
           miscBreakdownMap.set(key, prev);
         }
 
@@ -348,12 +354,39 @@
           prev.amount = round2(prev.amount + (unitPrice * qty));
           miscBreakdownMap.set(fallbackKey, prev);
         }
+      } else {
+        // When part qty is 0 or empty, only process manual charges
+        for (const item of miscItems) {
+          if (!item.manual) continue;
+          if (!Number.isFinite(item.price) || item.price <= 0) continue;
+          const description = String(item.description || "").trim() || "Misc charge";
+          const itemQuantity = Number(item.quantity || 1);
+          const unitPrice = round2(item.price);
+          const key = `${description}__${unitPrice}`;
+          const prev = miscBreakdownMap.get(key) || {
+            description,
+            unitPrice,
+            count: 0,
+            amount: 0,
+          };
+          prev.count = round2(prev.count + itemQuantity);
+          prev.amount = round2(prev.amount + (unitPrice * itemQuantity));
+          miscBreakdownMap.set(key, prev);
+        }
       }
     }
 
     total = round2(total);
     coreTotal = round2(coreTotal);
-    miscTotal = round2(miscTotal);
+    
+    // Calculate misc total from breakdown (includes both automatic and manual charges)
+    let miscTotalFromBreakdown = 0;
+    for (const row of miscBreakdownMap.values()) {
+      if (Number.isFinite(row.amount)) {
+        miscTotalFromBreakdown += row.amount;
+      }
+    }
+    miscTotal = round2(miscTotalFromBreakdown);
     return {
       partsTotal: total > 0 ? total : null,
       coreTotal,
@@ -794,7 +827,13 @@
 
     if (coreInput) coreInput.value = String(coreCharge);
     if (miscInput) miscInput.value = String(miscCharge);
-    if (miscDescriptionInput) miscDescriptionInput.value = JSON.stringify(miscItems);
+    if (miscDescriptionInput) {
+      // Preserve existing manual misc charges and add new automatic ones
+      const existingItems = getMiscItemsArray(tr);
+      const manualItems = existingItems.filter(item => item.manual === true);
+      const allItems = [...manualItems, ...miscItems];
+      miscDescriptionInput.value = JSON.stringify(allItems);
+    }
     setRowChargesMeta(tr);
 
     const price = tr.querySelector(".part-price");
@@ -1131,6 +1170,43 @@
     }
   }
 
+  // -------- manual misc charges --------
+  function getMiscItemsArray(tr) {
+    const raw = String(tr.querySelector(".part-misc-charge-description")?.value || "").trim();
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { }
+    return [];
+  }
+
+  function saveMiscItemsArray(tr, items) {
+    const input = tr.querySelector(".part-misc-charge-description");
+    if (!input) return;
+    input.value = JSON.stringify(items || []);
+  }
+
+  function addMiscChargeToRow(tr, description, quantity, price) {
+    const desc = String(description || "").trim();
+    const qty = Number(quantity || 1);
+    const prc = toNum(price);
+    if (!desc || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(prc) || prc < 0) {
+      toast("Description, Quantity > 0, and valid price are required.");
+      return false;
+    }
+
+    const items = getMiscItemsArray(tr);
+    items.push({
+      description: desc,
+      quantity: qty,
+      price: round2(prc),
+      manual: true,
+    });
+    saveMiscItemsArray(tr, items);
+    return true;
+  }
+
   // ---------------- init ----------------
   document.addEventListener("DOMContentLoaded", function () {
     const customersData = readJsonScript("customersData", []);
@@ -1229,6 +1305,61 @@
     Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
     recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
 
+    // -------- misc charge modal --------
+    const miscChargeModal = $("addMiscChargeModal");
+    const miscChargeDescInput = $("miscChargeDescInput");
+    const miscChargeQtyInput = $("miscChargeQtyInput");
+    const miscChargePriceInput = $("miscChargePriceInput");
+    const miscChargeAddBtn = $("miscChargeAddBtn");
+    let targetMiscBlock = null;
+
+    function setupMiscChargeButton(blockDiv) {
+      const btn = blockDiv.querySelector("#addMiscChargePartBtn");
+      if (!btn) return;
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        targetMiscBlock = blockDiv;
+        if (miscChargeDescInput) miscChargeDescInput.value = "";
+        if (miscChargeQtyInput) miscChargeQtyInput.value = "1";
+        if (miscChargePriceInput) miscChargePriceInput.value = "";
+
+        if (miscChargeModal && window.bootstrap && window.bootstrap.Modal) {
+          const modal = window.bootstrap.Modal.getOrCreateInstance(miscChargeModal);
+          modal.show();
+        }
+      });
+    }
+
+    Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((block) => {
+      setupMiscChargeButton(block);
+    });
+
+
+    miscChargeAddBtn?.addEventListener("click", function () {
+      if (!targetMiscBlock) return;
+
+      const partsTable = targetMiscBlock.querySelector("table tbody");
+      if (!partsTable) return;
+      const tr = partsTable.querySelector("tr.parts-row");
+      if (!tr) return;
+
+      const desc = miscChargeDescInput?.value || "";
+      const qty = miscChargeQtyInput?.value || "1";
+      const price = miscChargePriceInput?.value || "";
+
+      if (addMiscChargeToRow(tr, desc, qty, price)) {
+        recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+
+        if (miscChargeModal && window.bootstrap && window.bootstrap.Modal) {
+          const modal = window.bootstrap.Modal.getInstance(miscChargeModal);
+          if (modal) modal.hide();
+        }
+
+        toast("Misc charge added.");
+        targetMiscBlock = null;
+      }
+    });
+
     // initial enable state (before create)
     setEditorEnabled(!!(unitSel && String(unitSel.value || "").trim()));
 
@@ -1319,6 +1450,7 @@
 
     addLaborBtn?.addEventListener("click", function () {
       const cloned = cloneBlock(blocksContainer);
+      setupMiscChargeButton(cloned);
       Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
 
       const customerId = String(customerSel?.value || "").trim();
