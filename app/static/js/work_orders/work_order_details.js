@@ -27,6 +27,14 @@
 
   function money(n) { return Number.isFinite(n) ? n.toFixed(2) : ""; }
   function round2(n) { return Math.round(n * 100) / 100; }
+  function escapeText(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 
   function toast(msg) {
     // если у тебя есть SweetAlert — можно заменить на Swal.fire(...)
@@ -146,6 +154,7 @@
         <input class="form-control form-control-sm part-number" name="labors[${laborIndex}][parts][${rowIndex}][part_number]" maxlength="64" autocomplete="off">
         <input type="hidden" class="part-core-charge" name="labors[${laborIndex}][parts][${rowIndex}][core_charge]" value="0">
         <input type="hidden" class="part-misc-charge" name="labors[${laborIndex}][parts][${rowIndex}][misc_charge]" value="0">
+        <input type="hidden" class="part-misc-charge-description" name="labors[${laborIndex}][parts][${rowIndex}][misc_charge_description]" value="">
       </td>
       <td><input class="form-control form-control-sm part-description" name="labors[${laborIndex}][parts][${rowIndex}][description]" maxlength="200" autocomplete="off"></td>
       <td><input class="form-control form-control-sm part-qty" name="labors[${laborIndex}][parts][${rowIndex}][qty]" inputmode="numeric"></td>
@@ -167,8 +176,30 @@
     const p = tr.querySelector(".part-price")?.value || "";
     const core = toNum(tr.querySelector(".part-core-charge")?.value);
     const misc = toNum(tr.querySelector(".part-misc-charge")?.value);
+    const miscDesc = tr.querySelector(".part-misc-charge-description")?.value || "";
     const hasCharges = (Number.isFinite(core) && core > 0) || (Number.isFinite(misc) && misc > 0);
-    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim() || String(p).trim() || hasCharges);
+    return !!(String(pn).trim() || String(ds).trim() || String(q).trim() || String(c).trim() || String(p).trim() || hasCharges || String(miscDesc).trim());
+  }
+
+  function getRowMiscItems(tr) {
+    const raw = String(tr.querySelector(".part-misc-charge-description")?.value || "").trim();
+    if (!raw) return [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((x) => ({
+          description: String(x?.description || "").trim(),
+          price: toNum(x?.price),
+        }))
+        .filter((x) => x.description);
+    } catch {
+      return raw
+        .split("|")
+        .map((x) => ({ description: String(x || "").trim(), price: null }))
+        .filter((x) => x.description);
+    }
   }
 
   function getRowCharges(tr) {
@@ -183,15 +214,12 @@
   function setRowChargesMeta(tr) {
     const metaEl = tr.querySelector(".part-charges-meta");
     if (!metaEl) return;
-    const { coreCharge, miscCharge } = getRowCharges(tr);
-    if (coreCharge <= 0 && miscCharge <= 0) {
+    const { coreCharge } = getRowCharges(tr);
+    if (coreCharge <= 0) {
       metaEl.textContent = "";
       return;
     }
-    const bits = [];
-    if (coreCharge > 0) bits.push(`Core: $${money(coreCharge)}`);
-    if (miscCharge > 0) bits.push(`Misc: $${money(miscCharge)}`);
-    metaEl.textContent = bits.join(" • ");
+    metaEl.textContent = `Core: $${money(coreCharge)}`;
   }
 
   function clearRowCalc(tr) {
@@ -229,12 +257,11 @@
       return null;
     }
 
-    const unitTotal = round2(price + coreCharge + miscCharge);
+    const unitTotal = round2(price + coreCharge);
     const lt = round2(unitTotal * qty);
     if (lineCell) {
       const chips = [];
       if (coreCharge > 0) chips.push(`core $${money(coreCharge)}`);
-      if (miscCharge > 0) chips.push(`misc $${money(miscCharge)}`);
       const meta = chips.length ? `<div class="small text-muted">+ ${chips.join(" • ")}</div>` : "";
       lineCell.innerHTML = `<strong>$${money(lt)}</strong>${meta}`;
     }
@@ -270,6 +297,7 @@
     let total = 0;
     let coreTotal = 0;
     let miscTotal = 0;
+    const miscBreakdownMap = new Map();
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
 
     for (const tr of rows) {
@@ -282,9 +310,27 @@
 
       const qty = toNum(tr.querySelector(".part-qty")?.value);
       const { coreCharge, miscCharge } = getRowCharges(tr);
+      const miscItems = getRowMiscItems(tr);
       if (qty !== null && qty > 0) {
         coreTotal += round2(coreCharge * qty);
         miscTotal += round2(miscCharge * qty);
+
+        let hadPricedItems = false;
+        for (const item of miscItems) {
+          if (!Number.isFinite(item.price) || item.price <= 0) continue;
+          hadPricedItems = true;
+          const amount = round2(item.price * qty);
+          const prev = miscBreakdownMap.get(item.description) || 0;
+          miscBreakdownMap.set(item.description, round2(prev + amount));
+        }
+
+        if (!hadPricedItems && miscCharge > 0) {
+          const fallbackDescriptions = miscItems.map((x) => x.description).filter(Boolean);
+          const fallbackKey = fallbackDescriptions.length === 1 ? fallbackDescriptions[0] : "Misc charge";
+          const amount = round2(miscCharge * qty);
+          const prev = miscBreakdownMap.get(fallbackKey) || 0;
+          miscBreakdownMap.set(fallbackKey, round2(prev + amount));
+        }
       }
     }
 
@@ -295,17 +341,23 @@
       partsTotal: total > 0 ? total : null,
       coreTotal,
       miscTotal,
+      miscBreakdown: Array.from(miscBreakdownMap.entries()).map(([description, amount]) => ({
+        description,
+        amount: round2(amount),
+      })),
     };
   }
 
   // ---------------- totals per block + grand ----------------
-  function setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal) {
+  function setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, miscBreakdown) {
     const laborEl = blockEl.querySelector(".laborTotalDisplay");
     const partsEl = blockEl.querySelector(".partsTotalDisplay");
     const coreWrap = blockEl.querySelector(".coreTotalWrap");
     const coreEl = blockEl.querySelector(".coreTotalDisplay");
     const miscWrap = blockEl.querySelector(".miscTotalWrap");
     const miscEl = blockEl.querySelector(".miscTotalDisplay");
+    const miscDescWrap = blockEl.querySelector(".miscDescriptionsWrap");
+    const miscDescEl = blockEl.querySelector(".miscDescriptionsDisplay");
     const blockElTotal = blockEl.querySelector(".laborFullTotalDisplay");
 
     if (laborEl) laborEl.textContent = Number.isFinite(laborTotal) ? `$${money(laborTotal)}` : "—";
@@ -316,8 +368,28 @@
     if (miscWrap) miscWrap.style.display = hasMisc ? "" : "none";
     if (coreEl) coreEl.textContent = hasCore ? `$${money(coreTotal)}` : "—";
     if (miscEl) miscEl.textContent = hasMisc ? `$${money(miscTotal)}` : "—";
+    const breakdown = Array.isArray(miscBreakdown) ? miscBreakdown : [];
+    const hasMiscBreakdown = breakdown.length > 0;
+    const hasMiscSummary = hasMisc || hasMiscBreakdown;
+    if (miscDescWrap) miscDescWrap.style.display = hasMiscSummary ? "" : "none";
+    if (miscDescEl) {
+      if (!hasMiscSummary) {
+        miscDescEl.textContent = "—";
+      } else {
+        const lines = [];
+        if (hasMisc) lines.push(`<div>Total: $${money(miscTotal)}</div>`);
+        for (const row of breakdown) {
+          if (!Number.isFinite(row.amount) || row.amount <= 0) continue;
+          lines.push(`<div>${escapeText(row.description)}: $${money(row.amount)}</div>`);
+        }
+        miscDescEl.innerHTML = lines.join("");
+      }
+    }
 
-    const sum = (Number.isFinite(laborTotal) ? laborTotal : 0) + (Number.isFinite(partsTotal) ? partsTotal : 0);
+    const sum =
+      (Number.isFinite(laborTotal) ? laborTotal : 0)
+      + (Number.isFinite(partsTotal) ? partsTotal : 0)
+      + (Number.isFinite(miscTotal) ? miscTotal : 0);
     if (blockElTotal) {
       blockElTotal.textContent = (Number.isFinite(laborTotal) || Number.isFinite(partsTotal)) ? `$${money(round2(sum))}` : "—";
     }
@@ -330,7 +402,8 @@
     const partsTotal = partsTotals.partsTotal;
     const coreTotal = partsTotals.coreTotal;
     const miscTotal = partsTotals.miscTotal;
-    setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal);
+    const miscBreakdown = partsTotals.miscBreakdown;
+    setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, miscBreakdown);
     const labor = Number.isFinite(laborTotal) ? laborTotal : 0;
     const parts = Number.isFinite(partsTotal) ? partsTotal : 0;
     const core = Number.isFinite(coreTotal) ? coreTotal : 0;
@@ -340,7 +413,7 @@
       parts,
       core,
       misc,
-      total: round2(labor + parts),
+      total: round2(labor + parts + misc),
     };
   }
 
@@ -469,6 +542,7 @@
         Number.isFinite(parts) ? round2(parts) : null,
         Number.isFinite(core) ? round2(core) : 0,
         Number.isFinite(misc) ? round2(misc) : 0,
+        [],
       );
     });
 
@@ -607,6 +681,7 @@
     const cost = tr.querySelector(".part-cost");
     const coreInput = tr.querySelector(".part-core-charge");
     const miscInput = tr.querySelector(".part-misc-charge");
+    const miscDescriptionInput = tr.querySelector(".part-misc-charge-description");
 
     if (pn) pn.value = part.part_number || "";
     if (ds) {
@@ -622,9 +697,16 @@
     const miscCharge = (part?.misc_has_charge && Array.isArray(part?.misc_charges))
       ? Math.max(0, round2(part.misc_charges.reduce((sum, ch) => sum + (toNum(ch?.price) || 0), 0)))
       : 0;
+    const miscItems = (Array.isArray(part?.misc_charges) ? part.misc_charges : [])
+      .map((ch) => ({
+        description: String(ch?.description || "").trim(),
+        price: Number.isFinite(toNum(ch?.price)) ? round2(toNum(ch?.price)) : null,
+      }))
+      .filter((x) => x.description);
 
     if (coreInput) coreInput.value = String(coreCharge);
     if (miscInput) miscInput.value = String(miscCharge);
+    if (miscDescriptionInput) miscDescriptionInput.value = JSON.stringify(miscItems);
     setRowChargesMeta(tr);
 
     const price = tr.querySelector(".part-price");
@@ -663,6 +745,7 @@
       tr.querySelector(".part-number").name = `labors[${idx}][parts][${rIdx}][part_number]`;
       tr.querySelector(".part-core-charge").name = `labors[${idx}][parts][${rIdx}][core_charge]`;
       tr.querySelector(".part-misc-charge").name = `labors[${idx}][parts][${rIdx}][misc_charge]`;
+      tr.querySelector(".part-misc-charge-description").name = `labors[${idx}][parts][${rIdx}][misc_charge_description]`;
       tr.querySelector(".part-description").name = `labors[${idx}][parts][${rIdx}][description]`;
       tr.querySelector(".part-qty").name = `labors[${idx}][parts][${rIdx}][qty]`;
       tr.querySelector(".part-cost").name = `labors[${idx}][parts][${rIdx}][cost]`;
@@ -680,6 +763,9 @@
     });
     clone.querySelectorAll(".part-core-charge, .part-misc-charge").forEach(i => {
       i.value = "0";
+    });
+    clone.querySelectorAll(".part-misc-charge-description").forEach(i => {
+      i.value = "";
     });
     clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
     clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .laborFullTotalDisplay").forEach(el => el.textContent = "—");
@@ -702,8 +788,10 @@
         if (tr) {
           const coreInput = tr.querySelector(".part-core-charge");
           const miscInput = tr.querySelector(".part-misc-charge");
+          const miscDescriptionInput = tr.querySelector(".part-misc-charge-description");
           if (coreInput) coreInput.value = "0";
           if (miscInput) miscInput.value = "0";
+          if (miscDescriptionInput) miscDescriptionInput.value = "";
           setRowChargesMeta(tr);
           delete tr.dataset.priceAutofilled;
         }
@@ -808,6 +896,7 @@
         tr.querySelector(".part-price").value = String(p?.price ?? "");
         tr.querySelector(".part-core-charge").value = String(p?.core_charge ?? p?.core_cost ?? 0);
         tr.querySelector(".part-misc-charge").value = String(p?.misc_charge ?? 0);
+        tr.querySelector(".part-misc-charge-description").value = String(p?.misc_charge_description ?? "");
         setRowChargesMeta(tr);
         if (String(p?.price ?? "").trim()) tr.dataset.priceAutofilled = "1";
         tbody.appendChild(tr);
@@ -839,7 +928,8 @@
         const price = String(tr.querySelector(".part-price")?.value || "").trim();
         const coreCharge = String(tr.querySelector(".part-core-charge")?.value || "").trim();
         const miscCharge = String(tr.querySelector(".part-misc-charge")?.value || "").trim();
-        if (!(part_number || description || qty || cost || price || coreCharge || miscCharge)) return;
+        const miscChargeDescription = String(tr.querySelector(".part-misc-charge-description")?.value || "").trim();
+        if (!(part_number || description || qty || cost || price || coreCharge || miscCharge || miscChargeDescription)) return;
         parts.push({
           part_number,
           description,
@@ -848,6 +938,7 @@
           price: price === "" ? 0 : Number(price),
           core_charge: coreCharge === "" ? 0 : Number(coreCharge),
           misc_charge: miscCharge === "" ? 0 : Number(miscCharge),
+          misc_charge_description: miscChargeDescription,
         });
       });
 

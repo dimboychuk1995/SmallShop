@@ -138,8 +138,11 @@ def normalize_saved_labors(raw):
                 else (p.get("core_cost") if p.get("core_cost") is not None else "")
             ).strip()
             misc_charge = str(p.get("misc_charge") if p.get("misc_charge") is not None else "").strip()
+            misc_charge_description = str(
+                p.get("misc_charge_description") if p.get("misc_charge_description") is not None else ""
+            ).strip()
 
-            if not (part_number or description or qty or cost or price or core_charge or misc_charge):
+            if not (part_number or description or qty or cost or price or core_charge or misc_charge or misc_charge_description):
                 continue
 
             parts_out.append(
@@ -151,6 +154,7 @@ def normalize_saved_labors(raw):
                     "price": price,
                     "core_charge": core_charge,
                     "misc_charge": misc_charge,
+                    "misc_charge_description": misc_charge_description,
                 }
             )
 
@@ -540,7 +544,7 @@ def preview_work_order():
     labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
     # parts
     parts_re = re.compile(
-        r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price|core_charge|misc_charge)\]$"
+        r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price|core_charge|misc_charge|misc_charge_description)\]$"
     )
 
     for key, val in request.form.items():
@@ -580,6 +584,8 @@ def preview_work_order():
                 b["parts"][ridx]["core_charge"] = (val or "").strip()
             elif field == "misc_charge":
                 b["parts"][ridx]["misc_charge"] = (val or "").strip()
+            elif field == "misc_charge_description":
+                b["parts"][ridx]["misc_charge_description"] = (val or "").strip()
             continue
 
     # normalize labors list in order
@@ -597,7 +603,8 @@ def preview_work_order():
             price = (p.get("price") or "").strip()
             core_charge = (p.get("core_charge") or p.get("core_cost") or "").strip()
             misc_charge = (p.get("misc_charge") or "").strip()
-            if not (pn or ds or qty or cost or price or core_charge or misc_charge):
+            misc_charge_description = (p.get("misc_charge_description") or "").strip()
+            if not (pn or ds or qty or cost or price or core_charge or misc_charge or misc_charge_description):
                 continue
             parts_clean.append({
                 "part_number": pn,
@@ -607,6 +614,7 @@ def preview_work_order():
                 "price": price,
                 "core_charge": core_charge,
                 "misc_charge": misc_charge,
+                "misc_charge_description": misc_charge_description,
             })
 
         labor = b.get("labor") or {}

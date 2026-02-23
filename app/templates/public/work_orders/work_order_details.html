@@ -223,6 +223,7 @@
                           <input class="form-control form-control-sm part-number" name="labors[0][parts][0][part_number]" maxlength="64" autocomplete="off">
                           <input type="hidden" class="part-core-charge" name="labors[0][parts][0][core_charge]" value="0">
                           <input type="hidden" class="part-misc-charge" name="labors[0][parts][0][misc_charge]" value="0">
+                          <input type="hidden" class="part-misc-charge-description" name="labors[0][parts][0][misc_charge_description]" value="">
                         </td>
                         <td><input class="form-control form-control-sm part-description" name="labors[0][parts][0][description]" maxlength="200" autocomplete="off"></td>
                         <td><input class="form-control form-control-sm part-qty" name="labors[0][parts][0][qty]" inputmode="numeric"></td>
@@ -236,6 +237,11 @@
                     </tbody>
 
                   </table>
+                </div>
+
+                <div class="text-muted small mt-2 miscDescriptionsWrap" style="display:none;">
+                  <div>Misc charges:</div>
+                  <div class="miscDescriptionsDisplay">—</div>
                 </div>
               </div>
 
