@@ -63,6 +63,7 @@ def normalize_totals_payload(raw):
         parts_total = round2(b.get("parts_total"))
         core_total = round2(b.get("core_total"))
         misc_total = round2(b.get("misc_total"))
+        shop_supply_total = round2(b.get("shop_supply_total"))
         labor_full_total = round2(b.get("labor_full_total"))
         blocks.append(
             {
@@ -70,6 +71,7 @@ def normalize_totals_payload(raw):
                 "parts_total": parts_total,
                 "core_total": core_total,
                 "misc_total": misc_total,
+                "shop_supply_total": shop_supply_total,
                 "labor_full_total": labor_full_total,
             }
         )
@@ -78,6 +80,7 @@ def normalize_totals_payload(raw):
     parts_total = round2(src.get("parts_total"))
     core_total = round2(src.get("core_total"))
     misc_total = round2(src.get("misc_total"))
+    shop_supply_total = round2(src.get("shop_supply_total"))
     grand_total = round2(src.get("grand_total"))
 
     return {
@@ -85,6 +88,7 @@ def normalize_totals_payload(raw):
         "parts_total": parts_total,
         "core_total": core_total,
         "misc_total": misc_total,
+        "shop_supply_total": shop_supply_total,
         "grand_total": grand_total,
         "labors": blocks,
     }
@@ -362,6 +366,34 @@ def get_pricing_rules_json(shop_db, shop_id: ObjectId):
     return {"mode": mode, "rules": rules}
 
 
+def get_shop_supply_percentage(shop_db, shop_id: ObjectId) -> float:
+    col = shop_db.shop_supply_amount_rules
+    doc = col.find_one({"shop_id": shop_id})
+    if not doc:
+        now = utcnow()
+        col.update_one(
+            {"shop_id": shop_id},
+            {
+                "$setOnInsert": {
+                    "shop_id": shop_id,
+                    "shop_supply_procentage": 5,
+                    "is_active": True,
+                    "created_at": now,
+                },
+                "$set": {
+                    "updated_at": now,
+                },
+            },
+            upsert=True,
+        )
+        doc = col.find_one({"shop_id": shop_id}) or {}
+    try:
+        raw = doc.get("shop_supply_procentage")
+        return float(raw) if raw is not None else 0.0
+    except Exception:
+        return 0.0
+
+
 def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
     customers = get_customers(shop_db)
 
@@ -379,6 +411,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "selected_unit_id": str(unit_id) if unit_id else "",
         "labor_rates": get_labor_rates(shop_db, shop["_id"]),
         "parts_pricing_rules": get_pricing_rules_json(shop_db, shop["_id"]),
+        "shop_supply_procentage": get_shop_supply_percentage(shop_db, shop["_id"]),
 
         # старые поля (оставляем как у тебя было)
         "labor_description": (form_state or {}).get("labor_description") or "",

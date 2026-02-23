@@ -349,13 +349,15 @@
   }
 
   // ---------------- totals per block + grand ----------------
-  function setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, miscBreakdown) {
+  function setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, shopSupplyTotal, miscBreakdown) {
     const laborEl = blockEl.querySelector(".laborTotalDisplay");
     const partsEl = blockEl.querySelector(".partsTotalDisplay");
     const coreWrap = blockEl.querySelector(".coreTotalWrap");
     const coreEl = blockEl.querySelector(".coreTotalDisplay");
     const miscWrap = blockEl.querySelector(".miscTotalWrap");
     const miscEl = blockEl.querySelector(".miscTotalDisplay");
+    const supplyWrap = blockEl.querySelector(".shopSupplyTotalWrap");
+    const supplyEl = blockEl.querySelector(".shopSupplyTotalDisplay");
     const miscDescWrap = blockEl.querySelector(".miscDescriptionsWrap");
     const miscDescEl = blockEl.querySelector(".miscDescriptionsDisplay");
     const blockElTotal = blockEl.querySelector(".laborFullTotalDisplay");
@@ -364,10 +366,13 @@
     if (partsEl) partsEl.textContent = Number.isFinite(partsTotal) ? `$${money(partsTotal)}` : "—";
     const hasCore = Number.isFinite(coreTotal) && coreTotal > 0;
     const hasMisc = Number.isFinite(miscTotal) && miscTotal > 0;
+    const hasSupply = Number.isFinite(shopSupplyTotal) && shopSupplyTotal > 0;
     if (coreWrap) coreWrap.style.display = hasCore ? "" : "none";
     if (miscWrap) miscWrap.style.display = hasMisc ? "" : "none";
+    if (supplyWrap) supplyWrap.style.display = hasSupply ? "" : "none";
     if (coreEl) coreEl.textContent = hasCore ? `$${money(coreTotal)}` : "—";
     if (miscEl) miscEl.textContent = hasMisc ? `$${money(miscTotal)}` : "—";
+    if (supplyEl) supplyEl.textContent = hasSupply ? `$${money(shopSupplyTotal)}` : "—";
     const breakdown = Array.isArray(miscBreakdown) ? miscBreakdown : [];
     const hasMiscBreakdown = breakdown.length > 0;
     const hasMiscSummary = hasMisc || hasMiscBreakdown;
@@ -390,12 +395,13 @@
       (Number.isFinite(laborTotal) ? laborTotal : 0)
       + (Number.isFinite(partsTotal) ? partsTotal : 0)
       + (Number.isFinite(miscTotal) ? miscTotal : 0);
+    const sumWithSupply = sum + (Number.isFinite(shopSupplyTotal) ? shopSupplyTotal : 0);
     if (blockElTotal) {
-      blockElTotal.textContent = (Number.isFinite(laborTotal) || Number.isFinite(partsTotal)) ? `$${money(round2(sum))}` : "—";
+      blockElTotal.textContent = (Number.isFinite(laborTotal) || Number.isFinite(partsTotal)) ? `$${money(round2(sumWithSupply))}` : "—";
     }
   }
 
-  function recalcBlock(blockEl, pricing, laborRates) {
+  function recalcBlock(blockEl, pricing, laborRates, shopSupplyPct) {
     ensureTrailingEmptyRow(blockEl);
     const laborTotal = calcLaborTotal(blockEl, laborRates);
     const partsTotals = calcPartsTotal(blockEl, pricing);
@@ -403,39 +409,48 @@
     const coreTotal = partsTotals.coreTotal;
     const miscTotal = partsTotals.miscTotal;
     const miscBreakdown = partsTotals.miscBreakdown;
-    setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, miscBreakdown);
+    const supplyBase = (Number.isFinite(laborTotal) ? laborTotal : 0) + (Number.isFinite(partsTotal) ? partsTotal : 0);
+    const supplyTotal = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
+      ? round2(supplyBase * (shopSupplyPct / 100))
+      : 0;
+    setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, supplyTotal, miscBreakdown);
     const labor = Number.isFinite(laborTotal) ? laborTotal : 0;
     const parts = Number.isFinite(partsTotal) ? partsTotal : 0;
     const core = Number.isFinite(coreTotal) ? coreTotal : 0;
     const misc = Number.isFinite(miscTotal) ? miscTotal : 0;
+    const supply = Number.isFinite(supplyTotal) ? supplyTotal : 0;
     return {
       labor,
       parts,
       core,
       misc,
-      total: round2(labor + parts + misc),
+      supply,
+      total: round2(labor + parts + misc + supply),
     };
   }
 
-  function recalcAll(blocksContainer, pricing, laborRates) {
+  function recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct) {
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     let laborGrand = 0;
     let partsGrand = 0;
     let coreGrand = 0;
     let miscGrand = 0;
+    let supplyGrand = 0;
     let grand = 0;
     for (const b of blocks) {
-      const totals = recalcBlock(b, pricing, laborRates);
+      const totals = recalcBlock(b, pricing, laborRates, shopSupplyPct);
       laborGrand += totals.labor;
       partsGrand += totals.parts;
       coreGrand += totals.core;
       miscGrand += totals.misc;
+      supplyGrand += totals.supply;
       grand += totals.total;
     }
     laborGrand = round2(laborGrand);
     partsGrand = round2(partsGrand);
     coreGrand = round2(coreGrand);
     miscGrand = round2(miscGrand);
+    supplyGrand = round2(supplyGrand);
     grand = round2(grand);
 
     const laborGrandEl = $("laborGrandTotalDisplay");
@@ -455,6 +470,12 @@
     const hasMiscGrand = miscGrand > 0;
     if (miscGrandWrap) miscGrandWrap.style.display = hasMiscGrand ? "" : "none";
     if (miscGrandEl) miscGrandEl.textContent = hasMiscGrand ? `$${money(miscGrand)}` : "—";
+
+    const supplyGrandWrap = $("shopSupplyGrandTotalWrap");
+    const supplyGrandEl = $("shopSupplyGrandTotalDisplay");
+    const hasSupplyGrand = supplyGrand > 0;
+    if (supplyGrandWrap) supplyGrandWrap.style.display = hasSupplyGrand ? "" : "none";
+    if (supplyGrandEl) supplyGrandEl.textContent = hasSupplyGrand ? `$${money(supplyGrand)}` : "—";
 
     const grandEl = $("grandTotalDisplay");
     if (grandEl) grandEl.textContent = blocks.length ? `$${money(grand)}` : "—";
@@ -478,6 +499,7 @@
     let partsSum = 0;
     let coreSum = 0;
     let miscSum = 0;
+    let supplySum = 0;
     let grandSum = 0;
 
     blocks.forEach((bEl) => {
@@ -486,17 +508,20 @@
       const blockText = bEl.querySelector(".laborFullTotalDisplay")?.textContent || "0";
       const coreText = bEl.querySelector(".coreTotalDisplay")?.textContent || "0";
       const miscText = bEl.querySelector(".miscTotalDisplay")?.textContent || "0";
+      const supplyText = bEl.querySelector(".shopSupplyTotalDisplay")?.textContent || "0";
 
       const laborTotal = round2(parseMoneyText(laborText));
       const partsTotal = round2(parseMoneyText(partsText));
       const coreTotal = round2(parseMoneyText(coreText));
       const miscTotal = round2(parseMoneyText(miscText));
+      const supplyTotal = round2(parseMoneyText(supplyText));
       const blockTotal = round2(parseMoneyText(blockText));
 
       laborSum += laborTotal;
       partsSum += partsTotal;
       coreSum += coreTotal;
       miscSum += miscTotal;
+      supplySum += supplyTotal;
       grandSum += blockTotal;
 
       outBlocks.push({
@@ -504,6 +529,7 @@
         parts_total: partsTotal,
         core_total: coreTotal,
         misc_total: miscTotal,
+        shop_supply_total: supplyTotal,
         labor_full_total: blockTotal,
       });
     });
@@ -518,12 +544,13 @@
       parts_total: round2(partsSum),
       core_total: round2(coreSum),
       misc_total: round2(miscSum),
+      shop_supply_total: round2(supplySum),
       grand_total: grandFinal,
       labors: outBlocks,
     };
   }
 
-  function applyTotalsSnapshotToUi(blocksContainer, totals) {
+  function applyTotalsSnapshotToUi(blocksContainer, totals, shopSupplyPct) {
     if (!totals || typeof totals !== "object" || !blocksContainer) return;
 
     const blockTotals = Array.isArray(totals.labors) ? totals.labors : [];
@@ -536,12 +563,17 @@
       const core = toNum(bt.core_total);
       const misc = toNum(bt.misc_total);
       if (labor === null && parts === null && core === null && misc === null) return;
+      const supplyBase = (Number.isFinite(labor) ? labor : 0) + (Number.isFinite(parts) ? parts : 0);
+      const supplyTotal = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
+        ? round2(supplyBase * (shopSupplyPct / 100))
+        : 0;
       setBlockTotalsUI(
         bEl,
         Number.isFinite(labor) ? round2(labor) : null,
         Number.isFinite(parts) ? round2(parts) : null,
         Number.isFinite(core) ? round2(core) : 0,
         Number.isFinite(misc) ? round2(misc) : 0,
+        supplyTotal,
         [],
       );
     });
@@ -551,6 +583,7 @@
     const coreGrand = toNum(totals.core_total);
     const miscGrand = toNum(totals.misc_total);
     const grand = toNum(totals.grand_total);
+    const supplyGrand = toNum(totals.shop_supply_total);
 
     const laborGrandEl = $("laborGrandTotalDisplay");
     if (laborGrandEl && Number.isFinite(laborGrand)) laborGrandEl.textContent = `$${money(round2(laborGrand))}`;
@@ -569,6 +602,12 @@
     const hasMiscGrand = Number.isFinite(miscGrand) && miscGrand > 0;
     if (miscGrandWrap) miscGrandWrap.style.display = hasMiscGrand ? "" : "none";
     if (miscGrandEl) miscGrandEl.textContent = hasMiscGrand ? `$${money(round2(miscGrand))}` : "—";
+
+    const supplyGrandWrap = $("shopSupplyGrandTotalWrap");
+    const supplyGrandEl = $("shopSupplyGrandTotalDisplay");
+    const hasSupplyGrand = Number.isFinite(supplyGrand) && supplyGrand > 0;
+    if (supplyGrandWrap) supplyGrandWrap.style.display = hasSupplyGrand ? "" : "none";
+    if (supplyGrandEl) supplyGrandEl.textContent = hasSupplyGrand ? `$${money(round2(supplyGrand))}` : "—";
 
     const grandEl = $("grandTotalDisplay");
     if (grandEl && Number.isFinite(grand)) grandEl.textContent = `$${money(round2(grand))}`;
@@ -786,7 +825,7 @@
     return clone;
   }
 
-  function wireBlockEvents(blocksContainer, pricing, laborRates) {
+  function wireBlockEvents(blocksContainer, pricing, laborRates, shopSupplyPct) {
     blocksContainer.addEventListener("input", function (e) {
       const t = e.target;
       if (!t) return;
@@ -807,7 +846,7 @@
 
       const blockEl = t.closest(".wo-labor");
       if (!blockEl) return;
-      recalcAll(blocksContainer, pricing, laborRates);
+      recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
     });
 
     blocksContainer.addEventListener("click", function (e) {
@@ -822,7 +861,7 @@
 
       blockEl.remove();
       Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
-      recalcAll(blocksContainer, pricing, laborRates);
+      recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
     });
   }
 
@@ -1056,7 +1095,10 @@
     const customersData = readJsonScript("customersData", []);
     const laborRates = readJsonScript("laborRatesData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
+    const shopSupplyData = readJsonScript("shopSupplyData", { percentage: 0 });
     const totalsSnapshot = readJsonScript("workOrderTotalsData", {});
+
+    const shopSupplyPct = toNum(shopSupplyData?.percentage ?? shopSupplyData) || 0;
 
     const blocksContainer = $("laborsContainer");
     if (!blocksContainer) return;
@@ -1142,9 +1184,9 @@
     applyDraftToUi(blocksContainer, draftBlocks);
 
     // wire + totals
-    wireBlockEvents(blocksContainer, pricing, laborRates);
+    wireBlockEvents(blocksContainer, pricing, laborRates, shopSupplyPct);
     Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
-    recalcAll(blocksContainer, pricing, laborRates);
+    recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
 
     // initial enable state (before create)
     setEditorEnabled(!!(unitSel && String(unitSel.value || "").trim()));
@@ -1158,7 +1200,7 @@
 
       const defaultRateCode = getCustomerDefaultLaborRate(customersData, customerId);
       applyDefaultLaborRateToAll(blocksContainer, defaultRateCode, false);
-      recalcAll(blocksContainer, pricing, laborRates);
+      recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
 
       if (unitHidden) unitHidden.value = "";
       if (unitSel) {
@@ -1205,7 +1247,7 @@
 
       fillRowFromPart(tr, it);
       hideDropdown(dd);
-      recalcAll(blocksContainer, pricing, laborRates);
+      recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
     });
 
     document.addEventListener("click", function (e) {
@@ -1242,7 +1284,7 @@
       const defaultRateCode = getCustomerDefaultLaborRate(customersData, customerId);
       applyDefaultLaborRateToBlock(cloned, defaultRateCode, true);
 
-      recalcAll(blocksContainer, pricing, laborRates);
+      recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
     });
 
     // ---------- created/paid state ----------
@@ -1351,10 +1393,10 @@
     const initialCustomerId = String(customerSel?.value || "").trim();
     const initialDefaultRateCode = getCustomerDefaultLaborRate(customersData, initialCustomerId);
     applyDefaultLaborRateToAll(blocksContainer, initialDefaultRateCode, true);
-    recalcAll(blocksContainer, pricing, laborRates);
+    recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
 
     if (isCreated) {
-      applyTotalsSnapshotToUi(blocksContainer, totalsSnapshot);
+      applyTotalsSnapshotToUi(blocksContainer, totalsSnapshot, shopSupplyPct);
     }
 
     applyStateFromStatus();
