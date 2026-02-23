@@ -409,7 +409,7 @@
     const coreTotal = partsTotals.coreTotal;
     const miscTotal = partsTotals.miscTotal;
     const miscBreakdown = partsTotals.miscBreakdown;
-    const supplyBase = (Number.isFinite(laborTotal) ? laborTotal : 0) + (Number.isFinite(partsTotal) ? partsTotal : 0);
+    const supplyBase = Number.isFinite(laborTotal) ? laborTotal : 0;
     const supplyTotal = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
       ? round2(supplyBase * (shopSupplyPct / 100))
       : 0;
@@ -563,7 +563,7 @@
       const core = toNum(bt.core_total);
       const misc = toNum(bt.misc_total);
       if (labor === null && parts === null && core === null && misc === null) return;
-      const supplyBase = (Number.isFinite(labor) ? labor : 0) + (Number.isFinite(parts) ? parts : 0);
+      const supplyBase = Number.isFinite(labor) ? labor : 0;
       const supplyTotal = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
         ? round2(supplyBase * (shopSupplyPct / 100))
         : 0;
@@ -583,7 +583,13 @@
     const coreGrand = toNum(totals.core_total);
     const miscGrand = toNum(totals.misc_total);
     const grand = toNum(totals.grand_total);
-    const supplyGrand = toNum(totals.shop_supply_total);
+    const supplyGrandStored = toNum(totals.shop_supply_total);
+    const supplyGrand = (Number.isFinite(laborGrand) && Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
+      ? round2(laborGrand * (shopSupplyPct / 100))
+      : (Number.isFinite(supplyGrandStored) ? round2(supplyGrandStored) : 0);
+    const calculatedGrand = (Number.isFinite(laborGrand) && Number.isFinite(partsGrand) && Number.isFinite(miscGrand))
+      ? round2(laborGrand + partsGrand + miscGrand + supplyGrand)
+      : null;
 
     const laborGrandEl = $("laborGrandTotalDisplay");
     if (laborGrandEl && Number.isFinite(laborGrand)) laborGrandEl.textContent = `$${money(round2(laborGrand))}`;
@@ -610,7 +616,13 @@
     if (supplyGrandEl) supplyGrandEl.textContent = hasSupplyGrand ? `$${money(round2(supplyGrand))}` : "—";
 
     const grandEl = $("grandTotalDisplay");
-    if (grandEl && Number.isFinite(grand)) grandEl.textContent = `$${money(round2(grand))}`;
+    if (grandEl) {
+      if (Number.isFinite(calculatedGrand)) {
+        grandEl.textContent = `$${money(calculatedGrand)}`;
+      } else if (Number.isFinite(grand)) {
+        grandEl.textContent = `$${money(round2(grand))}`;
+      }
+    }
   }
 
   function upsertHiddenJsonInput(formEl, name, obj) {
