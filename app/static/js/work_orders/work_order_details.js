@@ -319,17 +319,34 @@
         for (const item of miscItems) {
           if (!Number.isFinite(item.price) || item.price <= 0) continue;
           hadPricedItems = true;
-          const amount = round2(item.price * qty);
-          const prev = miscBreakdownMap.get(item.description) || 0;
-          miscBreakdownMap.set(item.description, round2(prev + amount));
+          const description = String(item.description || "").trim() || "Misc charge";
+          const unitPrice = round2(item.price);
+          const key = `${description}__${unitPrice}`;
+          const prev = miscBreakdownMap.get(key) || {
+            description,
+            unitPrice,
+            count: 0,
+            amount: 0,
+          };
+          prev.count = round2(prev.count + qty);
+          prev.amount = round2(prev.amount + (unitPrice * qty));
+          miscBreakdownMap.set(key, prev);
         }
 
         if (!hadPricedItems && miscCharge > 0) {
           const fallbackDescriptions = miscItems.map((x) => x.description).filter(Boolean);
-          const fallbackKey = fallbackDescriptions.length === 1 ? fallbackDescriptions[0] : "Misc charge";
-          const amount = round2(miscCharge * qty);
-          const prev = miscBreakdownMap.get(fallbackKey) || 0;
-          miscBreakdownMap.set(fallbackKey, round2(prev + amount));
+          const fallbackDescription = fallbackDescriptions.length === 1 ? fallbackDescriptions[0] : "Misc charge";
+          const unitPrice = round2(miscCharge);
+          const fallbackKey = `${fallbackDescription}__${unitPrice}`;
+          const prev = miscBreakdownMap.get(fallbackKey) || {
+            description: fallbackDescription,
+            unitPrice,
+            count: 0,
+            amount: 0,
+          };
+          prev.count = round2(prev.count + qty);
+          prev.amount = round2(prev.amount + (unitPrice * qty));
+          miscBreakdownMap.set(fallbackKey, prev);
         }
       }
     }
@@ -341,10 +358,18 @@
       partsTotal: total > 0 ? total : null,
       coreTotal,
       miscTotal,
-      miscBreakdown: Array.from(miscBreakdownMap.entries()).map(([description, amount]) => ({
-        description,
-        amount: round2(amount),
-      })),
+      miscBreakdown: Array.from(miscBreakdownMap.values())
+        .map((row) => ({
+          description: String(row.description || "").trim() || "Misc charge",
+          unitPrice: Number.isFinite(row.unitPrice) ? round2(row.unitPrice) : 0,
+          count: Number.isFinite(row.count) ? round2(row.count) : 0,
+          amount: Number.isFinite(row.amount) ? round2(row.amount) : 0,
+        }))
+        .sort((a, b) => {
+          const byDescription = a.description.localeCompare(b.description);
+          if (byDescription !== 0) return byDescription;
+          return a.unitPrice - b.unitPrice;
+        }),
     };
   }
 
@@ -382,10 +407,14 @@
         miscDescEl.textContent = "—";
       } else {
         const lines = [];
-        if (hasMisc) lines.push(`<div>Total: $${money(miscTotal)}</div>`);
+        if (hasMisc) lines.push(`<div>Misc charge total: $${money(miscTotal)}</div>`);
         for (const row of breakdown) {
           if (!Number.isFinite(row.amount) || row.amount <= 0) continue;
-          lines.push(`<div>${escapeText(row.description)}: $${money(row.amount)}</div>`);
+          const unitPrice = Number.isFinite(row.unitPrice) ? row.unitPrice : 0;
+          const count = Number.isFinite(row.count) ? row.count : 0;
+          lines.push(
+            `<div>${escapeText(row.description)}, ${escapeText(String(count))}, $${money(unitPrice)}, $${money(row.amount)}</div>`
+          );
         }
         miscDescEl.innerHTML = lines.join("");
       }
