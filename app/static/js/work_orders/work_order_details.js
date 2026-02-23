@@ -595,6 +595,14 @@
     };
   }
 
+  async function fetchVinDetails(vin) {
+    const url = `/work_orders/api/vin?vin=${encodeURIComponent(vin)}`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.ok ? data : null;
+  }
+
   function ensureDropdown() {
     let dd = document.getElementById("partsSearchDropdown");
     if (dd) return dd;
@@ -1074,10 +1082,33 @@
     const addLaborBtn = $("addLaborBtn");
     const addUnitBtn = $("addUnitBtn");
 
+    const unitVinInput = $("unitVinInput");
+    const unitMakeInput = $("unitMakeInput");
+    const unitModelInput = $("unitModelInput");
+    const unitYearInput = $("unitYearInput");
+    const unitTypeInput = $("unitTypeInput");
+
     const els = {
       editor, customerSel, unitSel, addUnitBtn, addLaborBtn,
       createBtn, editBtn, saveBtn, paidBtn, unpaidBtn
     };
+
+    let lastVinLookup = "";
+    const debouncedVinLookup = debounce(async function () {
+      if (!unitVinInput) return;
+      const vin = String(unitVinInput.value || "").trim().toUpperCase();
+      if (vin.length !== 17) return;
+      if (vin === lastVinLookup) return;
+      lastVinLookup = vin;
+
+      const data = await fetchVinDetails(vin);
+      if (!data) return;
+
+      if (unitMakeInput && data.make) unitMakeInput.value = data.make;
+      if (unitModelInput && data.model) unitModelInput.value = data.model;
+      if (unitYearInput && data.year) unitYearInput.value = data.year;
+      if (unitTypeInput && data.type) unitTypeInput.value = data.type;
+    }, 500);
 
     function setEditorEnabled(enabled) {
       if (editor) editor.disabled = !enabled;
@@ -1102,6 +1133,9 @@
 
     // create still uses normal form POST
     createBtn?.addEventListener("click", () => submitWithAction("create"));
+
+    unitVinInput?.addEventListener("input", debouncedVinLookup);
+    unitVinInput?.addEventListener("blur", debouncedVinLookup);
 
     // ---------- restore draft FIRST ----------
     const draftBlocks = readJsonScript("workOrderDraftData", []);
