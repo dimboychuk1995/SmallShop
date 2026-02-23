@@ -213,6 +213,44 @@ def seed_labor_rates(shop_db, shop_id: ObjectId):
         )
 
 
+# -----------------------------
+# NEW: shop supply amount rules seeding (shop DB)
+# -----------------------------
+
+def seed_shop_supply_amount_rules(shop_db, shop_id: ObjectId):
+    """
+    Ensure default shop supply amount rules exist in shop DB (idempotent).
+    Collection: shop_supply_amount_rules
+    """
+    if shop_db is None or shop_id is None:
+        return
+
+    col = shop_db.shop_supply_amount_rules
+
+    try:
+        col.create_index([("shop_id", 1)], unique=True, name="uniq_shop_supply_amount_rules_shop")
+    except Exception:
+        pass
+
+    now = utcnow()
+
+    col.update_one(
+        {"shop_id": shop_id},
+        {
+            "$setOnInsert": {
+                "shop_id": shop_id,
+                "shop_supply_procentage": 5,
+                "is_active": True,
+                "created_at": now,
+            },
+            "$set": {
+                "updated_at": now,
+            },
+        },
+        upsert=True,
+    )
+
+
 def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     """
     Creates shop DB and seeds minimal defaults:
@@ -220,6 +258,7 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     - default parts categories (idempotent)
     - default parts pricing rules (margin/markup ranges) (idempotent)
     - default labor rates (idempotent)   <-- NEW
+    - default shop supply amount rules (idempotent)
     """
     client = get_mongo_client()
     sdb = client[shop_db_name]
@@ -323,6 +362,14 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     # -----------------------------
     try:
         seed_labor_rates(sdb, shop_oid)
+    except Exception:
+        pass
+
+    # -----------------------------
+    # seed default shop supply amount rules (NEW)
+    # -----------------------------
+    try:
+        seed_shop_supply_amount_rules(sdb, shop_oid)
     except Exception:
         pass
 
