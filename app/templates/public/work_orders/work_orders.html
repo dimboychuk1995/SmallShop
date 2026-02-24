@@ -181,8 +181,9 @@
         document.getElementById("paymentListAlreadyPaid").textContent = `$${(data.paid_amount || 0).toFixed(2)}`;
         document.getElementById("paymentListRemainingBalance").textContent = `$${(data.remaining_balance || 0).toFixed(2)}`;
         
-        // Clear input fields
-        document.getElementById("paymentListAmountInput").value = "";
+        // Pre-fill amount with remaining balance
+        const remainingBalance = data.remaining_balance || 0;
+        document.getElementById("paymentListAmountInput").value = remainingBalance > 0 ? remainingBalance.toFixed(2) : "";
         document.getElementById("paymentListMethodInput").value = "cash";
         document.getElementById("paymentListNotesInput").value = "";
 

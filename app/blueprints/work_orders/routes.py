@@ -1083,6 +1083,10 @@ def api_work_order_set_status(work_order_id):
     now = utcnow()
     user_id = current_user_id()
 
+    # If changing to "open" (unpaid), delete all payment records for this work order
+    if status == "open":
+        shop_db.work_order_payments.delete_many({"work_order_id": wo_id})
+
     shop_db.work_orders.update_one(
         {"_id": wo_id},
         {
