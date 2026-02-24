@@ -1808,17 +1808,36 @@
       }
     });
 
-    // paid -> status paid
+    // paid -> open payment modal
     paidBtn?.addEventListener("click", async function () {
       if (!isCreated || !workOrderId) return;
 
       try {
-        await apiPostJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/status`, { status: "paid" });
-        workOrderStatus = "paid";
-        applyStateFromStatus();
-        toast("Marked as paid.");
+        // Fetch current payment info
+        const res = await fetch(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/payments`, {
+          method: "GET",
+          headers: { "Accept": "application/json" }
+        });
+        const data = await res.json();
+
+        if (!data.ok) throw new Error(data.error || "Failed to load payment info");
+
+        // Update modal with payment info
+        document.getElementById("paymentInvoiceTotal").textContent = `$${(data.grand_total || 0).toFixed(2)}`;
+        document.getElementById("paymentAlreadyPaid").textContent = `$${(data.paid_amount || 0).toFixed(2)}`;
+        document.getElementById("paymentRemainingBalance").textContent = `$${(data.remaining_balance || 0).toFixed(2)}`;
+
+        // Pre-fill amount with remaining balance
+        const remainingBalance = data.remaining_balance || 0;
+        document.getElementById("paymentAmountInput").value = remainingBalance > 0 ? remainingBalance.toFixed(2) : "";
+        document.getElementById("paymentMethodInput").value = "cash";
+        document.getElementById("paymentNotesInput").value = "";
+
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById("paymentModal"));
+        modal.show();
       } catch (e) {
-        toast(e.message || "Failed to set paid.");
+        toast(e.message || "Failed to load payment info.");
       }
     });
 
@@ -1850,6 +1869,58 @@
     if (isCreated) {
       applyTotalsSnapshotToUi(blocksContainer, totalsSnapshot, shopSupplyPct);
     }
+
+    // Payment modal handler
+    const paymentSubmitBtn = $("paymentSubmitBtn");
+    paymentSubmitBtn?.addEventListener("click", async function () {
+      if (!isCreated || !workOrderId) return;
+
+      const amount = parseFloat(document.getElementById("paymentAmountInput").value || "0");
+      const paymentMethod = document.getElementById("paymentMethodInput").value;
+      const notes = document.getElementById("paymentNotesInput").value;
+
+      if (amount <= 0) {
+        toast("Please enter a valid payment amount.");
+        return;
+      }
+
+      const btn = this;
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+
+      try {
+        const res = await fetch(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({
+            amount,
+            payment_method: paymentMethod,
+            notes
+          })
+        });
+
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message || data.error || "Failed to record payment");
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById("paymentModal"));
+        modal.hide();
+
+        // If fully paid, update button states
+        if (data.is_fully_paid) {
+          workOrderStatus = "paid";
+          applyStateFromStatus();
+        }
+
+        toast("Payment recorded successfully!");
+      } catch (e) {
+        toast(e.message || "Failed to record payment.");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
 
     applyStateFromStatus();
   });

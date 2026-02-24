@@ -917,6 +917,147 @@ def api_work_order_update(work_order_id):
 
 
 
+@work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/payment")
+@login_required
+@permission_required("work_orders.create")
+def api_work_order_payment(work_order_id):
+    """
+    Record a payment for a work order.
+    Request body: {amount, payment_method, notes}
+    Saves to work_order_payments collection and updates work_order status if fully paid.
+    """
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "shop_db_missing"}), 200
+
+    wo_id = oid(work_order_id)
+    if not wo_id:
+        return jsonify({"ok": False, "error": "invalid_work_order_id"}), 200
+
+    wo = shop_db.work_orders.find_one({"_id": wo_id, "shop_id": shop["_id"], "is_active": True})
+    if not wo:
+        return jsonify({"ok": False, "error": "work_order_not_found"}), 200
+
+    data = request.get_json(silent=True) or {}
+    amount = f64(data.get("amount"))
+    payment_method = (data.get("payment_method") or "").strip() or "cash"
+    notes = (data.get("notes") or "").strip()
+
+    if amount is None or not (isinstance(amount, (int, float)) and amount > 0):
+        return jsonify({"ok": False, "error": "invalid_amount"}), 200
+
+    # Get work order grand total
+    grand_total = round2(wo.get("grand_total") or 0)
+
+    # Get payments already made
+    existing_payments = list(
+        shop_db.work_order_payments.find({"work_order_id": wo_id, "is_active": True})
+    )
+    paid_amount = round2(sum(round2(p.get("amount") or 0) for p in existing_payments))
+
+    # Calculate new balance
+    new_paid_amount = round2(paid_amount + amount)
+    remaining_balance = round2(grand_total - new_paid_amount)
+
+    # If payment exceeds total, return error
+    if new_paid_amount > grand_total:
+        return jsonify({
+            "ok": False,
+            "error": "overpayment",
+            "message": f"Payment would exceed invoice total. Current balance: ${round2(grand_total - paid_amount)}"
+        }), 200
+
+    now = utcnow()
+    user_id = current_user_id()
+
+    # Save payment record
+    payment_doc = {
+        "work_order_id": wo_id,
+        "shop_id": shop["_id"],
+        "tenant_id": shop.get("tenant_id"),
+        "amount": round2(amount),
+        "payment_method": payment_method,
+        "notes": notes,
+        "is_active": True,
+        "created_at": now,
+        "created_by": user_id,
+    }
+
+    payment_result = shop_db.work_order_payments.insert_one(payment_doc)
+    payment_id = payment_result.inserted_id
+
+    # Check if fully paid - if so, update work order status
+    is_fully_paid = remaining_balance <= 0.01  # Allow 1 cent rounding difference
+    if is_fully_paid:
+        shop_db.work_orders.update_one(
+            {"_id": wo_id},
+            {
+                "$set": {
+                    "status": "paid",
+                    "updated_at": now,
+                    "updated_by": user_id,
+                }
+            }
+        )
+
+    return jsonify({
+        "ok": True,
+        "payment_id": str(payment_id),
+        "amount_paid": round2(new_paid_amount),
+        "remaining_balance": remaining_balance,
+        "is_fully_paid": is_fully_paid
+    }), 200
+
+
+@work_orders_bp.get("/work_orders/api/work_orders/<work_order_id>/payments")
+@login_required
+@permission_required("work_orders.create")
+def api_get_work_order_payments(work_order_id):
+    """
+    Get all payments for a work order with balance info.
+    """
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "shop_db_missing"}), 200
+
+    wo_id = oid(work_order_id)
+    if not wo_id:
+        return jsonify({"ok": False, "error": "invalid_work_order_id"}), 200
+
+    wo = shop_db.work_orders.find_one({"_id": wo_id, "shop_id": shop["_id"], "is_active": True})
+    if not wo:
+        return jsonify({"ok": False, "error": "work_order_not_found"}), 200
+
+    grand_total = round2(wo.get("grand_total") or 0)
+
+    payments = list(
+        shop_db.work_order_payments.find({"work_order_id": wo_id, "is_active": True})
+        .sort([("created_at", -1)])
+    )
+
+    paid_amount = round2(sum(round2(p.get("amount") or 0) for p in payments))
+    remaining_balance = round2(grand_total - paid_amount)
+
+    payment_list = [
+        {
+            "id": str(p.get("_id")),
+            "amount": round2(p.get("amount") or 0),
+            "payment_method": p.get("payment_method") or "cash",
+            "notes": p.get("notes") or "",
+            "created_at": p.get("created_at").isoformat() if p.get("created_at") else "",
+        }
+        for p in payments
+    ]
+
+    return jsonify({
+        "ok": True,
+        "grand_total": grand_total,
+        "paid_amount": paid_amount,
+        "remaining_balance": remaining_balance,
+        "payments": payment_list
+    }), 200
+
+
 @work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/status")
 @login_required
 @permission_required("work_orders.create")

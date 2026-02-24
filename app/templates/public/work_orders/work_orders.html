@@ -75,6 +75,53 @@
   </div>
 </div>
 
+<!-- Payment Modal for Work Orders List -->
+<div class="modal fade" id="paymentModalList" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Record Payment</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="alert alert-info mb-3">
+          <div class="small">Invoice Total: <strong id="paymentListInvoiceTotal">—</strong></div>
+          <div class="small">Already Paid: <strong id="paymentListAlreadyPaid">—</strong></div>
+          <div class="small">Remaining Balance: <strong id="paymentListRemainingBalance">—</strong></div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Payment Amount</label>
+          <input type="number" id="paymentListAmountInput" class="form-control" inputmode="decimal" placeholder="0.00" step="0.01" min="0">
+          <small class="text-muted" id="paymentListAmountHelp"></small>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Payment Method</label>
+          <select id="paymentListMethodInput" class="form-select">
+            <option value="cash">Cash</option>
+            <option value="check">Check</option>
+            <option value="credit_card">Credit Card</option>
+            <option value="ach">ACH</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Notes (optional)</label>
+          <textarea id="paymentListNotesInput" class="form-control" rows="2" placeholder="e.g., Check #12345, etc."></textarea>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="paymentListSubmitBtn" class="btn btn-primary">Record Payment</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   (function () {
     "use strict";
@@ -90,12 +137,31 @@
       try { data = await res.json(); } catch { data = null; }
 
       if (!res.ok || !data || data.ok !== true) {
-        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : "Failed to update status.";
+        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : "Failed to update.";
         throw new Error(msg);
       }
 
       return data;
     }
+
+    async function getJson(url) {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+      });
+
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+
+      if (!res.ok || !data || data.ok !== true) {
+        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : "Failed to fetch.";
+        throw new Error(msg);
+      }
+
+      return data;
+    }
+
+    let currentWorkOrderId = null;
 
     document.addEventListener("click", async function (e) {
       const btn = e.target.closest(".js-mark-paid");
@@ -104,19 +170,74 @@
       const workOrderId = String(btn.dataset.workOrderId || "").trim();
       if (!workOrderId) return;
 
+      currentWorkOrderId = workOrderId;
+
+      // Fetch payment info
+      try {
+        const data = await getJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/payments`);
+        
+        // Update modal with balance info
+        document.getElementById("paymentListInvoiceTotal").textContent = `$${(data.grand_total || 0).toFixed(2)}`;
+        document.getElementById("paymentListAlreadyPaid").textContent = `$${(data.paid_amount || 0).toFixed(2)}`;
+        document.getElementById("paymentListRemainingBalance").textContent = `$${(data.remaining_balance || 0).toFixed(2)}`;
+        
+        // Clear input fields
+        document.getElementById("paymentListAmountInput").value = "";
+        document.getElementById("paymentListMethodInput").value = "cash";
+        document.getElementById("paymentListNotesInput").value = "";
+
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById("paymentModalList"));
+        modal.show();
+      } catch (err) {
+        alert(err.message || "Failed to load payment info.");
+      }
+    });
+
+    document.getElementById("paymentListSubmitBtn")?.addEventListener("click", async function () {
+      if (!currentWorkOrderId) return;
+
+      const amount = parseFloat(document.getElementById("paymentListAmountInput").value || "0");
+      const paymentMethod = document.getElementById("paymentListMethodInput").value;
+      const notes = document.getElementById("paymentListNotesInput").value;
+
+      if (amount <= 0) {
+        alert("Please enter a valid payment amount.");
+        return;
+      }
+
+      const btn = this;
       const originalText = btn.textContent;
       btn.disabled = true;
       btn.textContent = "Saving...";
 
       try {
-        await postJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/status`, { status: "paid" });
+        const data = await postJson(`/work_orders/api/work_orders/${encodeURIComponent(currentWorkOrderId)}/payment`, {
+          amount,
+          payment_method: paymentMethod,
+          notes
+        });
 
-        const td = btn.closest("td");
-        if (td) {
-          td.innerHTML = '<span class="badge bg-success">Paid</span>';
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById("paymentModalList"));
+        modal.hide();
+
+        // Update UI
+        if (data.is_fully_paid) {
+          const row = document.querySelector(`button[data-work-order-id="${currentWorkOrderId}"]`)?.closest("tr");
+          if (row) {
+            const td = row.querySelector("td:nth-child(7)");
+            if (td) {
+              td.innerHTML = '<span class="badge bg-success">Paid</span>';
+            }
+          }
         }
+
+        alert("Payment recorded successfully!");
+        currentWorkOrderId = null;
       } catch (err) {
-        alert(err.message || "Failed to set paid.");
+        alert(err.message || "Failed to record payment.");
+      } finally {
         btn.disabled = false;
         btn.textContent = originalText;
       }
