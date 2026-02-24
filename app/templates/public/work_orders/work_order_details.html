@@ -186,7 +186,7 @@
               <hr class="my-3"/>
 
               <div class="row g-3">
-                <div class="col-md-6">
+                <div class="col-md-5">
                   <label class="form-label">Labor Description</label>
                   <input class="form-control labor-description" name="labors[0][labor_description]" maxlength="200">
                 </div>
@@ -196,7 +196,7 @@
                   <input class="form-control labor-hours" name="labors[0][labor_hours]" inputmode="decimal">
                 </div>
 
-                <div class="col-md-4">
+                <div class="col-md-3">
                   <label class="form-label">Labor Rate</label>
                   <select class="form-select labor-rate" name="labors[0][labor_rate_code]">
                     <option value="">-- Select rate --</option>
@@ -204,6 +204,11 @@
                       <option value="{{ r.code }}">{{ r.name }} (${{ "%.2f"|format(r.hourly_rate) }}/hr)</option>
                     {% endfor %}
                   </select>
+                </div>
+
+                <div class="col-md-2">
+                  <label class="form-label">Labor Total</label>
+                  <input class="form-control labor-total-input" name="labors[0][labor_total_ui]" inputmode="decimal">
                 </div>
               </div>
 

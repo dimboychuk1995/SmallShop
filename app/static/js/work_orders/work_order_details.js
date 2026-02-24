@@ -143,6 +143,45 @@
     return round2(hours * hr);
   }
 
+  function setLaborTotalInput(blockEl, value) {
+    const input = blockEl.querySelector(".labor-total-input");
+    if (!input) return;
+    const active = document.activeElement;
+    const isEditing = active && active.classList?.contains("labor-total-input") && blockEl.contains(active);
+    if (isEditing) return;
+    input.value = Number.isFinite(value) ? money(value) : "";
+  }
+
+  function getLaborRateValue(blockEl, laborRates) {
+    const code = String(blockEl.querySelector(".labor-rate")?.value || "").trim();
+    if (!code) return null;
+    return getHourlyRate(laborRates, code);
+  }
+
+  function syncLaborTotalFromHours(blockEl, laborRates) {
+    const total = calcLaborTotal(blockEl, laborRates);
+    setLaborTotalInput(blockEl, total);
+  }
+
+  function syncHoursFromLaborTotal(blockEl, laborRates) {
+    const input = blockEl.querySelector(".labor-total-input");
+    const hoursInput = blockEl.querySelector(".labor-hours");
+    if (!input || !hoursInput) return;
+
+    const total = toNum(input.value);
+    const rate = getLaborRateValue(blockEl, laborRates);
+
+    if (total === null || rate === null || rate <= 0) {
+      if (total === null) {
+        hoursInput.value = "";
+      }
+      return;
+    }
+
+    const hours = round2(total / rate);
+    hoursInput.value = Number.isFinite(hours) ? String(hours) : "";
+  }
+
   // ---------------- parts rows ----------------
   function makePartsRow(laborIndex, rowIndex) {
     const tr = document.createElement("tr");
@@ -419,6 +458,7 @@
     const blockElTotal = blockEl.querySelector(".laborFullTotalDisplay");
 
     if (laborEl) laborEl.textContent = Number.isFinite(laborTotal) ? `$${money(laborTotal)}` : "—";
+    setLaborTotalInput(blockEl, Number.isFinite(laborTotal) ? laborTotal : null);
     if (partsEl) partsEl.textContent = Number.isFinite(partsTotal) ? `$${money(partsTotal)}` : "—";
     const hasCore = Number.isFinite(coreTotal) && coreTotal > 0;
     const hasMisc = Number.isFinite(miscTotal) && miscTotal > 0;
@@ -895,6 +935,8 @@
     blockEl.querySelector(".labor-description").name = `labors[${idx}][labor_description]`;
     blockEl.querySelector(".labor-hours").name = `labors[${idx}][labor_hours]`;
     blockEl.querySelector(".labor-rate").name = `labors[${idx}][labor_rate_code]`;
+    const laborTotalInput = blockEl.querySelector(".labor-total-input");
+    if (laborTotalInput) laborTotalInput.name = `labors[${idx}][labor_total_ui]`;
 
     const tbody = blockEl.querySelector(".partsTbody");
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
@@ -946,6 +988,7 @@
   }
 
   function wireBlockEvents(blocksContainer, pricing, laborRates, shopSupplyPct) {
+    let isLaborSyncing = false;
     blocksContainer.addEventListener("input", function (e) {
       const t = e.target;
       if (!t) return;
@@ -962,6 +1005,24 @@
           delete tr.dataset.autoMiscItemsBaseline;
           setRowChargesMeta(tr);
           delete tr.dataset.priceAutofilled;
+        }
+      }
+
+      if (!isLaborSyncing && t.classList?.contains("labor-total-input")) {
+        const blockEl = t.closest(".wo-labor");
+        if (blockEl) {
+          isLaborSyncing = true;
+          syncHoursFromLaborTotal(blockEl, laborRates);
+          isLaborSyncing = false;
+        }
+      }
+
+      if (!isLaborSyncing && (t.classList?.contains("labor-hours") || t.classList?.contains("labor-rate"))) {
+        const blockEl = t.closest(".wo-labor");
+        if (blockEl) {
+          isLaborSyncing = true;
+          syncLaborTotalFromHours(blockEl, laborRates);
+          isLaborSyncing = false;
         }
       }
 
@@ -1025,6 +1086,15 @@
         delete blockEl.dataset.shouldReRenderMiscTable;
       }
     });
+
+    blocksContainer.addEventListener("blur", function (e) {
+      const t = e.target;
+      if (!t || !t.classList?.contains("labor-total-input")) return;
+      const blockEl = t.closest(".wo-labor");
+      if (!blockEl) return;
+      const total = toNum(t.value);
+      t.value = Number.isFinite(total) ? money(total) : "";
+    }, true);
 
     blocksContainer.addEventListener("click", function (e) {
       const btn = e.target.closest(".removeLaborBtn");
@@ -1721,8 +1791,6 @@
       const tr = target.closest("tr.parts-row");
       const blockEl = target.closest(".wo-labor");
       if (!tr || !blockEl) return;
-
-      target.addEventListener("input", () => debouncedSearch(dd, target, tr, blockEl));
       target.addEventListener("focus", () => debouncedSearch(dd, target, tr, blockEl));
       debouncedSearch(dd, target, tr, blockEl);
     }, { passive: true });
