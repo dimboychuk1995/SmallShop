@@ -1077,10 +1077,39 @@ def api_get_all_payments():
         .limit(500)
     )
 
+    work_order_ids = [p.get("work_order_id") for p in payments if p.get("work_order_id")]
+    work_orders_map = {}
+    customer_ids = []
+    if work_order_ids:
+        work_orders = list(
+            shop_db.work_orders.find(
+                {"_id": {"$in": work_order_ids}, "shop_id": shop_id},
+                {"customer_id": 1},
+            )
+        )
+        for wo in work_orders:
+            wo_id = wo.get("_id")
+            if wo_id:
+                work_orders_map[wo_id] = wo
+            customer_id = wo.get("customer_id")
+            if customer_id:
+                customer_ids.append(customer_id)
+
+    customers_map = {}
+    if customer_ids:
+        customers = list(
+            shop_db.customers.find({"_id": {"$in": customer_ids}}, {"company_name": 1, "first_name": 1, "last_name": 1})
+        )
+        for c in customers:
+            c_id = c.get("_id")
+            if c_id:
+                customers_map[c_id] = customer_label(c)
+
     payment_list = [
         {
             "id": str(p.get("_id")),
             "work_order_id": str(p.get("work_order_id")) if p.get("work_order_id") else "",
+            "customer": customers_map.get((work_orders_map.get(p.get("work_order_id")) or {}).get("customer_id")) or "-",
             "amount": round2(p.get("amount") or 0),
             "payment_method": p.get("payment_method") or "cash",
             "notes": p.get("notes") or "",

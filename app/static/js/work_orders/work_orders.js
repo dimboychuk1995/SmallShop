@@ -1,6 +1,24 @@
 (function () {
   "use strict";
 
+  const WORK_ORDERS_ACTIVE_TAB_KEY = "workOrders.activeTab";
+
+  function safeGetLocalStorage(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  function safeSetLocalStorage(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
   async function postJson(url, body) {
     const res = await fetch(url, {
       method: "POST",
@@ -170,6 +188,7 @@
             <thead>
               <tr>
                 <th>Work Order ID</th>
+                <th>Customer</th>
                 <th>Amount</th>
                 <th>Method</th>
                 <th>Date</th>
@@ -191,6 +210,7 @@
           });
 
           const woId = String(payment.work_order_id || "").substring(0, 8) || "—";
+          const customer = String(payment.customer || "").trim() || "—";
           const amount = parseFloat(payment.amount) || 0;
           const method = String(payment.payment_method || "cash").toLowerCase();
           const notes = String(payment.notes || "").trim();
@@ -198,6 +218,7 @@
           html += `
             <tr>
               <td><code>${woId}</code></td>
+              <td>${customer}</td>
               <td class="fw-semibold">$${amount.toFixed(2)}</td>
               <td><span class="badge bg-secondary">${method}</span></td>
               <td><small>${createdAt}</small></td>
@@ -235,5 +256,95 @@
       }
     });
   }
+
+  // ========== TAB PERSISTENCE LOGIC ==========
+  const workOrdersTabIds = ["tab-work-orders", "tab-payments", "tab-estimates"];
+  const allTabs = workOrdersTabIds
+    .map((id) => document.getElementById(id))
+    .filter((el) => !!el);
+
+  const tabIdByPaneId = {
+    "content-work-orders": "tab-work-orders",
+    "content-payments": "tab-payments",
+    "content-estimates": "tab-estimates",
+  };
+
+  const paneIdByTabId = {
+    "tab-work-orders": "content-work-orders",
+    "tab-payments": "content-payments",
+    "tab-estimates": "content-estimates",
+  };
+
+  function activateTabFallback(tabId) {
+    const paneId = paneIdByTabId[tabId];
+    if (!paneId) return;
+
+    allTabs.forEach((btn) => {
+      const isActive = btn.id === tabId;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+
+    Object.entries(paneIdByTabId).forEach(([tid, pid]) => {
+      const pane = document.getElementById(pid);
+      if (!pane) return;
+      const isActive = tid === tabId;
+      pane.classList.toggle("active", isActive);
+      pane.classList.toggle("show", isActive);
+    });
+  }
+
+  function restoreSavedTab() {
+    let desiredTabId = null;
+
+    const hashPaneId = String(window.location.hash || "").replace(/^#/, "").trim();
+    if (hashPaneId && tabIdByPaneId[hashPaneId]) {
+      desiredTabId = tabIdByPaneId[hashPaneId];
+    }
+
+    if (!desiredTabId) {
+      const savedTabId = safeGetLocalStorage(WORK_ORDERS_ACTIVE_TAB_KEY);
+      if (savedTabId && workOrdersTabIds.includes(savedTabId)) {
+        desiredTabId = savedTabId;
+      }
+    }
+
+    if (!desiredTabId) return;
+
+    const savedTabButton = document.getElementById(desiredTabId);
+    if (!savedTabButton) return;
+
+    try {
+      if (window.bootstrap?.Tab?.getOrCreateInstance) {
+        window.bootstrap.Tab.getOrCreateInstance(savedTabButton).show();
+      } else {
+        activateTabFallback(desiredTabId);
+      }
+    } catch {
+      activateTabFallback(desiredTabId);
+    }
+  }
+
+  allTabs.forEach((tabBtn) => {
+    tabBtn.addEventListener("click", function (event) {
+      const clickedTabId = event?.currentTarget?.id;
+      if (clickedTabId) {
+        safeSetLocalStorage(WORK_ORDERS_ACTIVE_TAB_KEY, clickedTabId);
+      }
+    });
+
+    tabBtn.addEventListener("shown.bs.tab", function (event) {
+      const activatedTabId = event?.target?.id;
+      if (activatedTabId) {
+        safeSetLocalStorage(WORK_ORDERS_ACTIVE_TAB_KEY, activatedTabId);
+        const paneId = paneIdByTabId[activatedTabId];
+        if (paneId) {
+          window.location.hash = paneId;
+        }
+      }
+    });
+  });
+
+  window.addEventListener("load", restoreSavedTab);
 
 })();
