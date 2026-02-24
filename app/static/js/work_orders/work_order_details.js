@@ -416,8 +416,6 @@
     const miscEl = blockEl.querySelector(".miscTotalDisplay");
     const supplyWrap = blockEl.querySelector(".shopSupplyTotalWrap");
     const supplyEl = blockEl.querySelector(".shopSupplyTotalDisplay");
-    const miscDescWrap = blockEl.querySelector(".miscDescriptionsWrap");
-    const miscDescEl = blockEl.querySelector(".miscDescriptionsDisplay");
     const blockElTotal = blockEl.querySelector(".laborFullTotalDisplay");
 
     if (laborEl) laborEl.textContent = Number.isFinite(laborTotal) ? `$${money(laborTotal)}` : "—";
@@ -431,27 +429,9 @@
     if (coreEl) coreEl.textContent = hasCore ? `$${money(coreTotal)}` : "—";
     if (miscEl) miscEl.textContent = hasMisc ? `$${money(miscTotal)}` : "—";
     if (supplyEl) supplyEl.textContent = hasSupply ? `$${money(shopSupplyTotal)}` : "—";
-    const breakdown = Array.isArray(miscBreakdown) ? miscBreakdown : [];
-    const hasMiscBreakdown = breakdown.length > 0;
-    const hasMiscSummary = hasMisc || hasMiscBreakdown;
-    if (miscDescWrap) miscDescWrap.style.display = hasMiscSummary ? "" : "none";
-    if (miscDescEl) {
-      if (!hasMiscSummary) {
-        miscDescEl.textContent = "—";
-      } else {
-        const lines = [];
-        if (hasMisc) lines.push(`<div>Misc charge total: $${money(miscTotal)}</div>`);
-        for (const row of breakdown) {
-          if (!Number.isFinite(row.amount) || row.amount <= 0) continue;
-          const unitPrice = Number.isFinite(row.unitPrice) ? row.unitPrice : 0;
-          const count = Number.isFinite(row.count) ? row.count : 0;
-          lines.push(
-            `<div>${escapeText(row.description)}, ${escapeText(String(count))}, $${money(unitPrice)}, $${money(row.amount)}</div>`
-          );
-        }
-        miscDescEl.innerHTML = lines.join("");
-      }
-    }
+    
+    // Render editable misc charges table
+    renderMiscChargesTable(blockEl);
 
     const sum =
       (Number.isFinite(laborTotal) ? laborTotal : 0)
@@ -828,11 +808,64 @@
     if (coreInput) coreInput.value = String(coreCharge);
     if (miscInput) miscInput.value = String(miscCharge);
     if (miscDescriptionInput) {
-      // Preserve existing manual misc charges and add new automatic ones
-      const existingItems = getMiscItemsArray(tr);
-      const manualItems = existingItems.filter(item => item.manual === true);
-      const allItems = [...manualItems, ...miscItems];
-      miscDescriptionInput.value = JSON.stringify(allItems);
+      // Always store misc charges in the FIRST row of this block
+      // This keeps all automatic charges in one place for easier management
+      const blockEl = tr.closest(".wo-labor");
+      const tbody = blockEl.querySelector(".partsTbody");
+      const firstRow = tbody.querySelector("tr.parts-row");
+      const firstMiscInput = firstRow.querySelector(".part-misc-charge-description");
+      
+      if (firstMiscInput) {
+        // Get existing items from first row, preserve manual charges AND items from other rows
+        const existingItems = getMiscItemsArray(firstRow);
+        
+        // Get this row's index for tracking
+        const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
+        const rowIndex = rows.indexOf(tr);
+        
+        // Keep manual items + items from OTHER rows
+        const itemsToKeep = existingItems.filter(item => 
+          item.manual === true || item.partIndex !== rowIndex
+        );
+        
+        // Add new auto items with quantity multiplied by this row's qty
+        const rowQty = Number(tr.querySelector(".part-qty")?.value || 1) || 1;
+        const autoItemsForThisRow = miscItems.map(item => ({
+          ...item,
+          quantity: (Number(item.quantity || 1)) * rowQty,
+          partIndex: rowIndex  // Track which part this is from
+        }));
+        
+        const allItems = [...itemsToKeep, ...autoItemsForThisRow];
+        firstMiscInput.value = JSON.stringify(allItems);
+        
+        // Update baseline - add items for this row or replace if they exist
+        let baseline = [];
+        try {
+          const existing = JSON.parse(firstRow.dataset.autoMiscItemsBaseline || "[]");
+          baseline = existing.filter(item => item.partIndex !== rowIndex);  // Remove old items for this row
+        } catch (err) {
+          // Ignore parse errors
+        }
+        
+        const newBaseline = baseline.concat(
+          autoItemsForThisRow.map(item => ({
+            description: item.description,
+            price: item.price,
+            quantity: Number(item.quantity || 1),
+            partIndex: item.partIndex,
+            manual: false
+          }))
+        );
+        
+        firstRow.dataset.autoMiscItemsBaseline = JSON.stringify(newBaseline);
+      }
+      
+      // Clear misc charges from other rows
+      if (tr !== firstRow) {
+        miscDescriptionInput.value = "";
+        delete tr.dataset.autoMiscItemsBaseline;
+      }
     }
     setRowChargesMeta(tr);
 
@@ -894,8 +927,17 @@
     clone.querySelectorAll(".part-misc-charge-description").forEach(i => {
       i.value = "";
     });
+    clone.querySelectorAll("tr.parts-row").forEach(tr => {
+      delete tr.dataset.autoMiscItemsBaseline;
+    });
     clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
     clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .laborFullTotalDisplay").forEach(el => el.textContent = "—");
+
+    // Clear misc charges table
+    const miscTbody = clone.querySelector(".miscChargesTbody");
+    if (miscTbody) miscTbody.innerHTML = "";
+    const miscWrap = clone.querySelector(".miscChargesEditWrap");
+    if (miscWrap) miscWrap.style.display = "none";
 
     const tbody = clone.querySelector(".partsTbody");
     tbody.innerHTML = "";
@@ -919,8 +961,56 @@
           if (coreInput) coreInput.value = "0";
           if (miscInput) miscInput.value = "0";
           if (miscDescriptionInput) miscDescriptionInput.value = "";
+          delete tr.dataset.autoMiscItemsBaseline;
           setRowChargesMeta(tr);
           delete tr.dataset.priceAutofilled;
+        }
+      }
+
+      // When quantity changes, adjust automatic misc charges quantity
+      if (t.classList?.contains("part-qty")) {
+        const tr = t.closest("tr.parts-row");
+        if (tr) {
+          const blockEl = tr.closest(".wo-labor");
+          const tbody = blockEl.querySelector(".partsTbody");
+          const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
+          const rowIndex = rows.indexOf(tr);
+          const newQty = Number(tr.querySelector(".part-qty")?.value || 1) || 1;
+          
+          // Get first row (where all charges are stored)
+          const firstRow = rows[0];
+          const firstMiscInput = firstRow.querySelector(".part-misc-charge-description");
+          const baselineStr = firstRow.dataset.autoMiscItemsBaseline;
+          
+          if (firstMiscInput && baselineStr && rowIndex >= 0) {
+            try {
+              const baseline = JSON.parse(baselineStr);
+              const items = JSON.parse(firstMiscInput.value || "[]");
+              const manualItems = items.filter(item => item.manual === true);
+              
+              // Recalculate items for this row
+              const baselineForThisRow = baseline.filter(item => item.partIndex === rowIndex);
+              if (baselineForThisRow.length > 0) {
+                // Multiply baseline items by new quantity
+                const adjusted = baselineForThisRow.map(item => ({
+                  description: item.description,
+                  price: item.price,
+                  quantity: (Number(item.quantity || 1)) * newQty,
+                  partIndex: item.partIndex,
+                  manual: false
+                }));
+                
+                // Remove old items for this row and keep all other items
+                const otherAutoItems = items.filter(item => 
+                  item.manual === true || item.partIndex !== rowIndex
+                );
+                const allItems = [...otherAutoItems, ...adjusted];
+                firstMiscInput.value = JSON.stringify(allItems);
+              }
+            } catch (err) {
+              // JSON parse error, ignore
+            }
+          }
         }
       }
 
@@ -1207,6 +1297,102 @@
     return true;
   }
 
+  function renderMiscChargesTable(blockEl) {
+    const wrapEl = blockEl.querySelector(".miscChargesEditWrap");
+    const tbody = blockEl.querySelector(".miscChargesTbody");
+    if (!wrapEl || !tbody) return;
+
+    const partsTable = blockEl.querySelector("table tbody.partsTbody");
+    if (!partsTable) return;
+    
+    // Get misc items from first row (where all charges are stored)
+    const firstRow = partsTable.querySelector("tr.parts-row");
+    if (!firstRow) return;
+    
+    const miscItems = getMiscItemsArray(firstRow);
+    
+    if (miscItems.length === 0) {
+      wrapEl.style.display = "none";
+      tbody.innerHTML = "";
+      return;
+    }
+
+    wrapEl.style.display = "";
+    tbody.innerHTML = "";
+
+    miscItems.forEach((item, idx) => {
+      const qty = Number(item.quantity || 1);
+      const price = Number(item.price || 0);
+      const total = round2(qty * price);
+      const isManual = item.manual === true;
+      
+      const row = document.createElement("tr");
+      row.dataset.miscIndex = String(idx);
+      row.innerHTML = `
+        <td>
+          <input type="text" class="form-control form-control-sm misc-desc-input" value="${escapeText(item.description)}" placeholder="Description">
+          ${!isManual ? '<small class="d-block text-muted mt-1">From part data</small>' : ''}
+        </td>
+        <td>
+          <input type="number" class="form-control form-control-sm misc-qty-input" value="${qty}" step="1" min="0" max="999999" placeholder="Qty">
+        </td>
+        <td>
+          <input type="number" class="form-control form-control-sm misc-price-input" value="${price}" step="0.01" min="0" max="999999" placeholder="Price">
+        </td>
+        <td class="misc-total-display align-middle" style="font-weight: 500;">$${money(total)}</td>
+        <td>
+          <button type="button" class="btn btn-sm btn-outline-danger misc-delete-btn" title="Delete">&times;</button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function updateMiscChargeInRow(tr, index, newDesc, newQty, newPrice) {
+    const blockEl = tr.closest(".wo-labor");
+    if (!blockEl) return false;
+    
+    const desc = String(newDesc || "").trim();
+    const qty = Number(newQty || 0);
+    const price = toNum(newPrice);
+    
+    // Allow qty>=0 and valid price>=0
+    if (!desc || !Number.isFinite(qty) || qty < 0 || !Number.isFinite(price) || price < 0) {
+      return false;
+    }
+    
+    // Update in first row (where all charges are stored)
+    const tbody = blockEl.querySelector(".partsTbody");
+    const firstRow = tbody.querySelector("tr.parts-row");
+    if (!firstRow) return false;
+    
+    const items = getMiscItemsArray(firstRow);
+    if (index < 0 || index >= items.length) return false;
+    
+    items[index].description = desc;
+    items[index].quantity = qty;
+    items[index].price = round2(price);
+    saveMiscItemsArray(firstRow, items);
+    return true;
+  }
+
+  function removeMiscChargeFromRow(tr, index) {
+    const blockEl = tr.closest(".wo-labor");
+    if (!blockEl) return false;
+    
+    // Remove from first row (where all charges are stored)
+    const tbody = blockEl.querySelector(".partsTbody");
+    const firstRow = tbody.querySelector("tr.parts-row");
+    if (!firstRow) return false;
+    
+    const items = getMiscItemsArray(firstRow);
+    if (index < 0 || index >= items.length) return false;
+    
+    items.splice(index, 1);
+    saveMiscItemsArray(firstRow, items);
+    return true;
+  }
+
   // ---------------- init ----------------
   document.addEventListener("DOMContentLoaded", function () {
     const customersData = readJsonScript("customersData", []);
@@ -1304,6 +1490,69 @@
     wireBlockEvents(blocksContainer, pricing, laborRates, shopSupplyPct);
     Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
     recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+
+    // -------- misc charges table event handlers --------
+    blocksContainer.addEventListener("input", function (e) {
+      const target = e.target;
+      if (target.classList.contains("misc-desc-input") || 
+          target.classList.contains("misc-qty-input") || 
+          target.classList.contains("misc-price-input")) {
+        const row = target.closest("tr");
+        if (!row) return;
+        const index = Number(row.dataset.miscIndex);
+        const blockEl = target.closest(".wo-labor");
+        if (!blockEl) return;
+        
+        const partsTable = blockEl.querySelector("table tbody.partsTbody");
+        if (!partsTable) return;
+        const firstRow = partsTable.querySelector("tr.parts-row");
+        if (!firstRow) return;
+        
+        const descInput = row.querySelector(".misc-desc-input");
+        const qtyInput = row.querySelector(".misc-qty-input");
+        const priceInput = row.querySelector(".misc-price-input");
+        const totalDisplay = row.querySelector(".misc-total-display");
+        
+        if (descInput && qtyInput && priceInput) {
+          const newDesc = descInput.value;
+          const newQty = qtyInput.value;
+          const newPrice = priceInput.value;
+          
+          // Update total display immediately
+          const qty = Number(newQty || 0);
+          const price = toNum(newPrice);
+          if (Number.isFinite(qty) && Number.isFinite(price)) {
+            const total = round2(qty * price);
+            if (totalDisplay) totalDisplay.textContent = `$${money(total)}`;
+          }
+          
+          if (updateMiscChargeInRow(firstRow, index, newDesc, newQty, newPrice)) {
+            recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+          }
+        }
+      }
+    });
+
+    blocksContainer.addEventListener("click", function (e) {
+      const btn = e.target.closest(".misc-delete-btn");
+      if (!btn) return;
+      
+      e.preventDefault();
+      const row = btn.closest("tr");
+      if (!row) return;
+      const index = Number(row.dataset.miscIndex);
+      const blockEl = btn.closest(".wo-labor");
+      if (!blockEl) return;
+      
+      const partsTable = blockEl.querySelector("table tbody.partsTbody");
+      if (!partsTable) return;
+      const firstRow = partsTable.querySelector("tr.parts-row");
+      if (!firstRow) return;
+      
+      if (removeMiscChargeFromRow(firstRow, index)) {
+        recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+      }
+    });
 
     // -------- misc charge modal --------
     const miscChargeModal = $("addMiscChargeModal");
