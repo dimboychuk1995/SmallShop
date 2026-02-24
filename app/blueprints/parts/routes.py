@@ -9,6 +9,7 @@ from flask import request, redirect, url_for, flash, session, jsonify
 from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
+from app.utils.parts_search import build_parts_search_terms, build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
 
 from . import parts_bp
@@ -363,6 +364,7 @@ def parts_create():
         "part_number": part_number,
         "description": description or None,
         "reference": reference or None,
+        "search_terms": build_parts_search_terms(part_number, description, reference),
 
         "vendor_id": vendor_oid,
         "category_id": category_oid,
@@ -420,28 +422,52 @@ def parts_api_search():
     if not q:
         return {"ok": True, "items": []}
 
-    # Простой поиск: part_number startswith / contains, description contains
-    # (потом можно улучшить индексами/atlas)
-    regex = {"$regex": q, "$options": "i"}
-    cursor = parts_coll.find(
-        {
-            "is_active": True,
-            "$or": [
-                {"part_number": regex},
-                {"description": regex},
-                {"reference": regex},
-            ],
-        },
-        {
-            "part_number": 1,
-            "description": 1,
-            "average_cost": 1,
-            "vendor_id": 1,
-        },
-    ).sort([("part_number", 1)]).limit(limit)
+    import re
+
+    normalized_query, query_tokens = build_query_tokens(q)
+    if not normalized_query:
+        return {"ok": True, "items": []}
+
+    query_filter = {
+        "shop_id": shop["_id"],
+        "is_active": True,
+    }
+    if len(query_tokens) <= 1:
+        query_filter["search_terms"] = normalized_query
+    else:
+        query_filter["search_terms"] = {"$all": query_tokens}
+
+    projection = {
+        "part_number": 1,
+        "description": 1,
+        "reference": 1,
+        "average_cost": 1,
+        "vendor_id": 1,
+    }
+
+    fetch_limit = min(300, max(50, limit * 6))
+    cursor = (
+        parts_coll.find(query_filter, projection)
+        .sort([("part_number", 1)])
+        .limit(fetch_limit)
+    )
 
     items = []
+    seen_ids = set()
     for p in cursor:
+        if not part_matches_query(
+            normalized_query,
+            p.get("part_number"),
+            p.get("description"),
+            p.get("reference"),
+        ):
+            continue
+
+        part_id = p.get("_id")
+        if part_id in seen_ids:
+            continue
+        seen_ids.add(part_id)
+
         items.append({
             "id": str(p["_id"]),
             "part_number": p.get("part_number") or "",
@@ -449,6 +475,53 @@ def parts_api_search():
             "average_cost": float(p.get("average_cost") or 0.0),
             "vendor_id": str(p["vendor_id"]) if p.get("vendor_id") else "",
         })
+
+        if len(items) >= limit:
+            break
+
+    if len(items) < limit:
+        contains = re.escape(q)
+        fallback_filter = {
+            "shop_id": shop["_id"],
+            "is_active": True,
+            "search_terms": {"$exists": False},
+            "$or": [
+                {"part_number": {"$regex": contains, "$options": "i"}},
+                {"description": {"$regex": contains, "$options": "i"}},
+                {"reference": {"$regex": contains, "$options": "i"}},
+            ],
+        }
+
+        fallback_cursor = (
+            parts_coll.find(fallback_filter, projection)
+            .sort([("part_number", 1)])
+            .limit(fetch_limit)
+        )
+
+        for p in fallback_cursor:
+            if not part_matches_query(
+                normalized_query,
+                p.get("part_number"),
+                p.get("description"),
+                p.get("reference"),
+            ):
+                continue
+
+            part_id = p.get("_id")
+            if part_id in seen_ids:
+                continue
+            seen_ids.add(part_id)
+
+            items.append({
+                "id": str(p["_id"]),
+                "part_number": p.get("part_number") or "",
+                "description": p.get("description") or "",
+                "average_cost": float(p.get("average_cost") or 0.0),
+                "vendor_id": str(p["vendor_id"]) if p.get("vendor_id") else "",
+            })
+
+            if len(items) >= limit:
+                break
 
     return {"ok": True, "items": items}
 

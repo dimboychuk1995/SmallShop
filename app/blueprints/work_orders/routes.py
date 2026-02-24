@@ -8,6 +8,7 @@ from app.blueprints.work_orders import work_orders_bp
 from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
+from app.utils.parts_search import build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
 
 
@@ -735,8 +736,6 @@ def api_parts_search():
     Returns:
       {"items":[{id, part_number, description, reference, average_cost, in_stock}]}
     """
-    import re
-
     shop_db, shop = get_shop_db()
     if shop_db is None:
         return jsonify({"items": [], "error": "shop_db_missing"}), 200
@@ -751,26 +750,21 @@ def api_parts_search():
         limit = 20
     limit = max(1, min(limit, 50))
 
-    # Escape for regex
-    q_escaped = re.escape(q)
-    starts = f"^{q_escaped}"
-    contains = q_escaped  # regex "contains"
+    import re
 
     parts_col = shop_db.parts
+    normalized_query, query_tokens = build_query_tokens(q)
+    if not normalized_query:
+        return jsonify({"items": []}), 200
 
     query = {
         "shop_id": shop["_id"],
         "is_active": True,
-        "$or": [
-            # part_number: prefix first (fast + nice UX)
-            {"part_number": {"$regex": starts, "$options": "i"}},
-            # part_number: contains (fix: "225" matches "10-225")
-            {"part_number": {"$regex": contains, "$options": "i"}},
-            # other fields already contain
-            {"description": {"$regex": contains, "$options": "i"}},
-            {"reference": {"$regex": contains, "$options": "i"}},
-        ],
     }
+    if len(query_tokens) <= 1:
+        query["search_terms"] = normalized_query
+    else:
+        query["search_terms"] = {"$all": query_tokens}
 
     projection = {
         "part_number": 1,
@@ -784,10 +778,25 @@ def api_parts_search():
         "misc_charges": 1,
     }
 
-    cursor = parts_col.find(query, projection).sort([("part_number", 1)]).limit(limit)
+    fetch_limit = min(300, max(50, limit * 6))
+    cursor = parts_col.find(query, projection).sort([("part_number", 1)]).limit(fetch_limit)
 
     items = []
+    seen_ids = set()
     for p in cursor:
+        if not part_matches_query(
+            normalized_query,
+            p.get("part_number"),
+            p.get("description"),
+            p.get("reference"),
+        ):
+            continue
+
+        part_id = p.get("_id")
+        if part_id in seen_ids:
+            continue
+        seen_ids.add(part_id)
+
         misc_items = []
         for m in (p.get("misc_charges") or []):
             if not isinstance(m, dict):
@@ -809,6 +818,67 @@ def api_parts_search():
             "misc_has_charge": bool(p.get("misc_has_charge")),
             "misc_charges": misc_items,
         })
+
+        if len(items) >= limit:
+            break
+
+    if len(items) < limit:
+        contains = re.escape(q)
+        fallback_query = {
+            "shop_id": shop["_id"],
+            "is_active": True,
+            "search_terms": {"$exists": False},
+            "$or": [
+                {"part_number": {"$regex": contains, "$options": "i"}},
+                {"description": {"$regex": contains, "$options": "i"}},
+                {"reference": {"$regex": contains, "$options": "i"}},
+            ],
+        }
+
+        fallback_cursor = (
+            parts_col.find(fallback_query, projection)
+            .sort([("part_number", 1)])
+            .limit(fetch_limit)
+        )
+
+        for p in fallback_cursor:
+            if not part_matches_query(
+                normalized_query,
+                p.get("part_number"),
+                p.get("description"),
+                p.get("reference"),
+            ):
+                continue
+
+            part_id = p.get("_id")
+            if part_id in seen_ids:
+                continue
+            seen_ids.add(part_id)
+
+            misc_items = []
+            for m in (p.get("misc_charges") or []):
+                if not isinstance(m, dict):
+                    continue
+                misc_items.append({
+                    "description": str(m.get("description") or "").strip(),
+                    "price": float(m.get("price") or 0),
+                })
+
+            items.append({
+                "id": str(p.get("_id")),
+                "part_number": p.get("part_number") or "",
+                "description": p.get("description") or "",
+                "reference": p.get("reference") or "",
+                "average_cost": float(p.get("average_cost") or 0),
+                "in_stock": int(p.get("in_stock") or 0),
+                "core_has_charge": bool(p.get("core_has_charge")),
+                "core_cost": float(p.get("core_cost") or 0),
+                "misc_has_charge": bool(p.get("misc_has_charge")),
+                "misc_charges": misc_items,
+            })
+
+            if len(items) >= limit:
+                break
 
     return jsonify({"items": items}), 200
 

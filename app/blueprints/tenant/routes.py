@@ -63,6 +63,16 @@ def make_shop_db_name(tenant_slug: str, shop_slug: str) -> str:
     return db[:38]
 
 
+def ensure_tenant_collections_indexes(tenant_db):
+    """
+    Create indexes for tenant DB collections.
+    Safe to call multiple times.
+    """
+    tenant_db.settings.create_index("key", unique=True, name="uniq_settings_key")
+    tenant_db.roles.create_index("key", unique=True, name="uniq_roles_key")
+    tenant_db.roles.create_index("name", name="idx_roles_name")
+
+
 def init_tenant_database(db_name: str, tenant_doc: dict):
     """
     Creates tenant DB and seeds defaults:
@@ -80,12 +90,9 @@ def init_tenant_database(db_name: str, tenant_doc: dict):
         "created_at": utcnow(),
     })
 
-    tdb.settings.create_index("key", unique=True, name="uniq_settings_key")
+    ensure_tenant_collections_indexes(tdb)
 
     from app.constants.permissions import build_default_roles
-
-    tdb.roles.create_index("key", unique=True, name="uniq_roles_key")
-    tdb.roles.create_index("name", name="idx_roles_name")
 
     if tdb.roles.count_documents({}) == 0:
         now = utcnow()
@@ -251,6 +258,49 @@ def seed_shop_supply_amount_rules(shop_db, shop_id: ObjectId):
     )
 
 
+def ensure_shop_collections_indexes(shop_db):
+    """
+    Create indexes for shop-scoped collections used by UI/API queries.
+    Safe to call multiple times.
+    """
+    if shop_db is None:
+        return
+
+    # parts
+    parts = shop_db.parts
+    parts.create_index([("shop_id", 1), ("is_active", 1), ("part_number", 1)], name="idx_parts_shop_active_part_number")
+    parts.create_index([("shop_id", 1), ("is_active", 1), ("in_stock", 1)], name="idx_parts_shop_active_in_stock")
+    parts.create_index([("shop_id", 1), ("is_active", 1), ("search_terms", 1)], name="idx_parts_shop_active_search_terms")
+
+    # customers
+    customers = shop_db.customers
+    customers.create_index([("shop_id", 1), ("is_active", -1), ("company_name", 1), ("last_name", 1), ("first_name", 1), ("created_at", -1)], name="idx_customers_shop_list")
+
+    # vendors
+    vendors = shop_db.vendors
+    vendors.create_index([("shop_id", 1), ("is_active", -1), ("name", 1), ("created_at", -1)], name="idx_vendors_shop_list")
+
+    # units
+    units = shop_db.units
+    units.create_index([("customer_id", 1), ("is_active", 1), ("created_at", -1)], name="idx_units_customer_active_created")
+    units.create_index([("shop_id", 1), ("is_active", 1), ("created_at", -1)], name="idx_units_shop_active_created")
+
+    # work orders
+    work_orders = shop_db.work_orders
+    work_orders.create_index([("shop_id", 1), ("is_active", 1), ("created_at", -1)], name="idx_work_orders_shop_active_created")
+    work_orders.create_index([("shop_id", 1), ("status", 1), ("created_at", -1)], name="idx_work_orders_shop_status_created")
+
+    # payments
+    payments = shop_db.work_order_payments
+    payments.create_index([("work_order_id", 1), ("is_active", 1), ("created_at", -1)], name="idx_payments_work_order_active_created")
+    payments.create_index([("shop_id", 1), ("is_active", 1), ("created_at", -1)], name="idx_payments_shop_active_created")
+
+    # reference collections used in settings/work order forms
+    shop_db.parts_categories.create_index([("shop_id", 1), ("is_active", 1), ("name", 1)], name="idx_parts_categories_shop_active_name")
+    shop_db.parts_locations.create_index([("shop_id", 1), ("is_active", 1), ("name", 1)], name="idx_parts_locations_shop_active_name")
+    shop_db.labor_rates.create_index([("shop_id", 1), ("is_active", 1), ("name", 1)], name="idx_labor_rates_shop_active_name")
+
+
 def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     """
     Creates shop DB and seeds minimal defaults:
@@ -313,6 +363,14 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     if not shop_oid:
         # without shop_id we cannot seed shop-scoped collections
         return
+
+    # -----------------------------
+    # create indexes for all shop collections
+    # -----------------------------
+    try:
+        ensure_shop_collections_indexes(sdb)
+    except Exception:
+        pass
 
     # -----------------------------
     # seed default categories
