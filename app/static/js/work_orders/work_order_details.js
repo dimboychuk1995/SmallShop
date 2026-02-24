@@ -429,9 +429,6 @@
     if (coreEl) coreEl.textContent = hasCore ? `$${money(coreTotal)}` : "—";
     if (miscEl) miscEl.textContent = hasMisc ? `$${money(miscTotal)}` : "—";
     if (supplyEl) supplyEl.textContent = hasSupply ? `$${money(shopSupplyTotal)}` : "—";
-    
-    // Render editable misc charges table
-    renderMiscChargesTable(blockEl);
 
     const sum =
       (Number.isFinite(laborTotal) ? laborTotal : 0)
@@ -1331,7 +1328,6 @@
       row.innerHTML = `
         <td>
           <input type="text" class="form-control form-control-sm misc-desc-input" value="${escapeText(item.description)}" placeholder="Description">
-          ${!isManual ? '<small class="d-block text-muted mt-1">From part data</small>' : ''}
         </td>
         <td>
           <input type="number" class="form-control form-control-sm misc-qty-input" value="${qty}" step="1" min="0" max="999999" placeholder="Qty">
@@ -1490,6 +1486,11 @@
     wireBlockEvents(blocksContainer, pricing, laborRates, shopSupplyPct);
     Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
     recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+    
+    // Render misc charges tables for all blocks
+    Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach(blockEl => {
+      renderMiscChargesTable(blockEl);
+    });
 
     // -------- misc charges table event handlers --------
     blocksContainer.addEventListener("input", function (e) {
@@ -1526,8 +1527,22 @@
             if (totalDisplay) totalDisplay.textContent = `$${money(total)}`;
           }
           
-          if (updateMiscChargeInRow(firstRow, index, newDesc, newQty, newPrice)) {
-            recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+          // Update data without re-rendering table (just update the hidden field)
+          const items = getMiscItemsArray(firstRow);
+          if (index >= 0 && index < items.length) {
+            const desc = String(newDesc || "").trim();
+            const finalQty = Number(newQty || 0);
+            const finalPrice = toNum(newPrice);
+            
+            if (desc && Number.isFinite(finalQty) && finalQty >= 0 && Number.isFinite(finalPrice) && finalPrice >= 0) {
+              items[index].description = desc;
+              items[index].quantity = finalQty;
+              items[index].price = round2(finalPrice);
+              saveMiscItemsArray(firstRow, items);
+              
+              // Recalculate totals
+              recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+            }
           }
         }
       }
@@ -1551,6 +1566,7 @@
       
       if (removeMiscChargeFromRow(firstRow, index)) {
         recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+        renderMiscChargesTable(blockEl);
       }
     });
 
@@ -1598,6 +1614,9 @@
 
       if (addMiscChargeToRow(tr, desc, qty, price)) {
         recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+        
+        const blockEl = targetMiscBlock;
+        renderMiscChargesTable(blockEl);
 
         if (miscChargeModal && window.bootstrap && window.bootstrap.Modal) {
           const modal = window.bootstrap.Modal.getInstance(miscChargeModal);
@@ -1669,6 +1688,7 @@
       fillRowFromPart(tr, it);
       hideDropdown(dd);
       recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+      renderMiscChargesTable(blockEl);
     });
 
     document.addEventListener("click", function (e) {
