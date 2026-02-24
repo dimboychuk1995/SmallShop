@@ -138,8 +138,6 @@
     emptyEl.classList.add("d-none");
 
     try {
-      // Get all work orders to gather all payments
-      // For now, we'll fetch payments for work orders we know about
       const response = await fetch("/work_orders/api/work_orders/all-payments", {
         method: "GET",
         headers: { "Accept": "application/json" },
@@ -147,16 +145,17 @@
 
       let allPaymentsData = [];
 
-      if (response.ok) {
-        try {
-          const data = await response.json();
-          allPaymentsData = data.payments || [];
-        } catch {
-          // Fallback if endpoint doesn't exist yet
-          allPaymentsData = [];
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
+      const data = await response.json();
+      
+      if (!data.ok) {
+        throw new Error(data.error || "API returned error");
+      }
+
+      allPaymentsData = data.payments || [];
       loadingEl.classList.add("d-none");
 
       if (allPaymentsData.length === 0) {
@@ -181,23 +180,33 @@
       `;
 
       allPaymentsData.forEach(payment => {
-        const createdAt = new Date(payment.created_at).toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit"
-        });
+        try {
+          const dt = new Date(payment.created_at);
+          const createdAt = dt.toLocaleString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
+          });
 
-        html += `
-          <tr>
-            <td><code>${payment.work_order_id.substring(0, 8)}</code></td>
-            <td class="fw-semibold">$${(payment.amount || 0).toFixed(2)}</td>
-            <td><span class="badge bg-secondary">${payment.payment_method || "cash"}</span></td>
-            <td>${createdAt}</td>
-            <td>${payment.notes ? `<small>${payment.notes}</small>` : "<small class='text-muted'>—</small>"}</td>
-          </tr>
-        `;
+          const woId = String(payment.work_order_id || "").substring(0, 8) || "—";
+          const amount = parseFloat(payment.amount) || 0;
+          const method = String(payment.payment_method || "cash").toLowerCase();
+          const notes = String(payment.notes || "").trim();
+
+          html += `
+            <tr>
+              <td><code>${woId}</code></td>
+              <td class="fw-semibold">$${amount.toFixed(2)}</td>
+              <td><span class="badge bg-secondary">${method}</span></td>
+              <td><small>${createdAt}</small></td>
+              <td>${notes ? `<small>${notes}</small>` : "<small class='text-muted'>—</small>"}</td>
+            </tr>
+          `;
+        } catch (itemErr) {
+          console.warn("Error formatting payment:", payment, itemErr);
+        }
       });
 
       html += `
@@ -210,9 +219,10 @@
       contentEl.classList.remove("d-none");
       paymentsLoaded = true;
     } catch (err) {
+      console.error("Error loading payments:", err);
       loadingEl.classList.add("d-none");
       emptyEl.classList.remove("d-none");
-      emptyEl.textContent = `Error loading payments: ${err.message}`;
+      emptyEl.innerHTML = `<div class="alert alert-danger mb-0">Error loading payments: ${err.message}</div>`;
     }
   }
 

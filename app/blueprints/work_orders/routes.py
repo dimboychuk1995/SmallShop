@@ -1095,6 +1095,50 @@ def api_get_all_payments():
     }), 200
 
 
+@work_orders_bp.post("/work_orders/api/test/create-sample-payment/<work_order_id>")
+@login_required
+@permission_required("work_orders.create")
+def api_test_create_sample_payment(work_order_id):
+    """
+    TEST ENDPOINT: Create a sample payment for testing (remove in production).
+    """
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "shop_db_missing"}), 200
+
+    wo_id = oid(work_order_id)
+    if not wo_id:
+        return jsonify({"ok": False, "error": "invalid_work_order_id"}), 200
+
+    wo = shop_db.work_orders.find_one({"_id": wo_id, "shop_id": shop["_id"], "is_active": True})
+    if not wo:
+        return jsonify({"ok": False, "error": "work_order_not_found"}), 200
+
+    now = utcnow()
+    user_id = current_user_id()
+
+    # Create test payment
+    payment_doc = {
+        "work_order_id": wo_id,
+        "shop_id": shop["_id"],
+        "tenant_id": shop.get("tenant_id"),
+        "amount": 99.99,
+        "payment_method": "cash",
+        "notes": "[TEST PAYMENT]",
+        "is_active": True,
+        "created_at": now,
+        "created_by": user_id,
+    }
+
+    result = shop_db.work_order_payments.insert_one(payment_doc)
+
+    return jsonify({
+        "ok": True,
+        "message": "Test payment created",
+        "payment_id": str(result.inserted_id)
+    }), 200
+
+
 @work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/status")
 @login_required
 @permission_required("work_orders.create")
