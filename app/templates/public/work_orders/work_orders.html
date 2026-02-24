@@ -6,8 +6,8 @@
 <div class="card">
   <div class="card-body d-flex align-items-start justify-content-between gap-3">
     <div>
-      <h1 class="h4 mb-2">Work Orders</h1>
-      <p class="text-muted mb-0">Manage your work orders.</p>
+      <h1 class="h4 mb-2">Management</h1>
+      <p class="text-muted mb-0">Work orders, payments, and estimates.</p>
     </div>
 
     <div class="d-flex gap-2">
@@ -18,60 +18,109 @@
   </div>
 </div>
 
+<!-- Navigation Tabs -->
 <div class="card mt-3">
   <div class="card-body">
-    {% if work_orders and work_orders|length > 0 %}
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th>Customer</th>
-              <th>Date</th>
-              <th>Unit</th>
-              <th class="text-end">Labor</th>
-              <th class="text-end">Parts</th>
-              <th class="text-end">Total</th>
-              <th class="text-center">Paid</th>
-              <th class="text-end">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for w in work_orders %}
-              <tr>
-                <td>{{ w.customer }}</td>
-                <td>{{ w.date }}</td>
-                <td>{{ w.unit }}</td>
-                <td class="text-end">${{ "%.2f"|format(w.labor_total) }}</td>
-                <td class="text-end">${{ "%.2f"|format(w.parts_total) }}</td>
-                <td class="text-end fw-semibold">${{ "%.2f"|format(w.grand_total) }}</td>
-                <td class="text-center">
-                  {% if w.is_paid %}
-                    <span class="badge bg-success">Paid</span>
-                  {% else %}
-                    <button
-                      type="button"
-                      class="badge bg-warning text-dark border-0 js-mark-paid"
-                      data-work-order-id="{{ w.id }}"
-                      title="Click to mark as paid"
-                      style="cursor:pointer;"
-                    >
-                      Unpaid
-                    </button>
-                  {% endif %}
-                </td>
-                <td class="text-end">
-                  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('work_orders.work_order_details_page', work_order_id=w.id) }}">
-                    Edit
-                  </a>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    <ul class="nav nav-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-work-orders" data-bs-toggle="tab" data-bs-target="#content-work-orders" type="button" role="tab" aria-controls="content-work-orders" aria-selected="true">
+          Work Orders
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-payments" data-bs-toggle="tab" data-bs-target="#content-payments" type="button" role="tab" aria-controls="content-payments" aria-selected="false">
+          Payments
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-estimates" data-bs-toggle="tab" data-bs-target="#content-estimates" type="button" role="tab" aria-controls="content-estimates" aria-selected="false">
+          Estimates
+        </button>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<!-- Tab Content -->
+<div class="tab-content mt-3">
+  <!-- Work Orders Tab -->
+  <div class="tab-pane fade show active" id="content-work-orders" role="tabpanel" aria-labelledby="tab-work-orders">
+    <div class="card">
+      <div class="card-body">
+        {% if work_orders and work_orders|length > 0 %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Date</th>
+                  <th>Unit</th>
+                  <th class="text-end">Labor</th>
+                  <th class="text-end">Parts</th>
+                  <th class="text-end">Total</th>
+                  <th class="text-center">Paid</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for w in work_orders %}
+                  <tr>
+                    <td>{{ w.customer }}</td>
+                    <td>{{ w.date }}</td>
+                    <td>{{ w.unit }}</td>
+                    <td class="text-end">${{ "%.2f"|format(w.labor_total) }}</td>
+                    <td class="text-end">${{ "%.2f"|format(w.parts_total) }}</td>
+                    <td class="text-end fw-semibold">${{ "%.2f"|format(w.grand_total) }}</td>
+                    <td class="text-center">
+                      {% if w.is_paid %}
+                        <span class="badge bg-success">Paid</span>
+                      {% else %}
+                        <button
+                          type="button"
+                          class="badge bg-warning text-dark border-0 js-mark-paid"
+                          data-work-order-id="{{ w.id }}"
+                          title="Click to mark as paid"
+                          style="cursor:pointer;"
+                        >
+                          Unpaid
+                        </button>
+                      {% endif %}
+                    </td>
+                    <td class="text-end">
+                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('work_orders.work_order_details_page', work_order_id=w.id) }}">
+                        Edit
+                      </a>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="text-muted">No work orders yet.</div>
+        {% endif %}
       </div>
-    {% else %}
-      <div class="text-muted">No work orders yet.</div>
-    {% endif %}
+    </div>
+  </div>
+
+  <!-- Payments Tab -->
+  <div class="tab-pane fade" id="content-payments" role="tabpanel" aria-labelledby="tab-payments">
+    <div class="card">
+      <div class="card-body">
+        <div id="payments-loading" class="text-muted d-none">Loading payments...</div>
+        <div id="payments-content" class="d-none"></div>
+        <div id="payments-empty" class="text-muted">No payments recorded yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estimates Tab -->
+  <div class="tab-pane fade" id="content-estimates" role="tabpanel" aria-labelledby="tab-estimates">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-muted">Estimates feature coming soon.</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -122,127 +171,5 @@
   </div>
 </div>
 
-<script>
-  (function () {
-    "use strict";
-
-    async function postJson(url, body) {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify(body || {}),
-      });
-
-      let data = null;
-      try { data = await res.json(); } catch { data = null; }
-
-      if (!res.ok || !data || data.ok !== true) {
-        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : "Failed to update.";
-        throw new Error(msg);
-      }
-
-      return data;
-    }
-
-    async function getJson(url) {
-      const res = await fetch(url, {
-        method: "GET",
-        headers: { "Accept": "application/json" },
-      });
-
-      let data = null;
-      try { data = await res.json(); } catch { data = null; }
-
-      if (!res.ok || !data || data.ok !== true) {
-        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : "Failed to fetch.";
-        throw new Error(msg);
-      }
-
-      return data;
-    }
-
-    let currentWorkOrderId = null;
-
-    document.addEventListener("click", async function (e) {
-      const btn = e.target.closest(".js-mark-paid");
-      if (!btn) return;
-
-      const workOrderId = String(btn.dataset.workOrderId || "").trim();
-      if (!workOrderId) return;
-
-      currentWorkOrderId = workOrderId;
-
-      // Fetch payment info
-      try {
-        const data = await getJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/payments`);
-        
-        // Update modal with balance info
-        document.getElementById("paymentListInvoiceTotal").textContent = `$${(data.grand_total || 0).toFixed(2)}`;
-        document.getElementById("paymentListAlreadyPaid").textContent = `$${(data.paid_amount || 0).toFixed(2)}`;
-        document.getElementById("paymentListRemainingBalance").textContent = `$${(data.remaining_balance || 0).toFixed(2)}`;
-        
-        // Pre-fill amount with remaining balance
-        const remainingBalance = data.remaining_balance || 0;
-        document.getElementById("paymentListAmountInput").value = remainingBalance > 0 ? remainingBalance.toFixed(2) : "";
-        document.getElementById("paymentListMethodInput").value = "cash";
-        document.getElementById("paymentListNotesInput").value = "";
-
-        // Show modal
-        const modal = new bootstrap.Modal(document.getElementById("paymentModalList"));
-        modal.show();
-      } catch (err) {
-        alert(err.message || "Failed to load payment info.");
-      }
-    });
-
-    document.getElementById("paymentListSubmitBtn")?.addEventListener("click", async function () {
-      if (!currentWorkOrderId) return;
-
-      const amount = parseFloat(document.getElementById("paymentListAmountInput").value || "0");
-      const paymentMethod = document.getElementById("paymentListMethodInput").value;
-      const notes = document.getElementById("paymentListNotesInput").value;
-
-      if (amount <= 0) {
-        alert("Please enter a valid payment amount.");
-        return;
-      }
-
-      const btn = this;
-      const originalText = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = "Saving...";
-
-      try {
-        const data = await postJson(`/work_orders/api/work_orders/${encodeURIComponent(currentWorkOrderId)}/payment`, {
-          amount,
-          payment_method: paymentMethod,
-          notes
-        });
-
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById("paymentModalList"));
-        modal.hide();
-
-        // Update UI
-        if (data.is_fully_paid) {
-          const row = document.querySelector(`button[data-work-order-id="${currentWorkOrderId}"]`)?.closest("tr");
-          if (row) {
-            const td = row.querySelector("td:nth-child(7)");
-            if (td) {
-              td.innerHTML = '<span class="badge bg-success">Paid</span>';
-            }
-          }
-        }
-
-        alert("Payment recorded successfully!");
-        currentWorkOrderId = null;
-      } catch (err) {
-        alert(err.message || "Failed to record payment.");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-    });
-  })();
-</script>
+<script src="{{ url_for('static', filename='js/work_orders/work_orders.js') }}"></script>
 {% endblock %}

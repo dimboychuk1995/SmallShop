@@ -1058,6 +1058,43 @@ def api_get_work_order_payments(work_order_id):
     }), 200
 
 
+@work_orders_bp.get("/work_orders/api/work_orders/all-payments")
+@login_required
+@permission_required("work_orders.view")
+def api_get_all_payments():
+    """
+    Get all payments for the current shop.
+    """
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "shop_db_missing"}), 200
+
+    shop_id = shop["_id"]
+
+    payments = list(
+        shop_db.work_order_payments.find({"shop_id": shop_id, "is_active": True})
+        .sort([("created_at", -1)])
+        .limit(500)
+    )
+
+    payment_list = [
+        {
+            "id": str(p.get("_id")),
+            "work_order_id": str(p.get("work_order_id")) if p.get("work_order_id") else "",
+            "amount": round2(p.get("amount") or 0),
+            "payment_method": p.get("payment_method") or "cash",
+            "notes": p.get("notes") or "",
+            "created_at": p.get("created_at").isoformat() if p.get("created_at") else "",
+        }
+        for p in payments
+    ]
+
+    return jsonify({
+        "ok": True,
+        "payments": payment_list
+    }), 200
+
+
 @work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/status")
 @login_required
 @permission_required("work_orders.create")
