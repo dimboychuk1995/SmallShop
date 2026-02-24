@@ -836,7 +836,8 @@
         const allItems = [...itemsToKeep, ...autoItemsForThisRow];
         firstMiscInput.value = JSON.stringify(allItems);
         
-        // Update baseline - add items for this row or replace if they exist
+        // Update baseline - store items with un-multiplied quantity (baseline = quantity: 1)
+        // This allows us to recalculate properly when part qty changes later
         let baseline = [];
         try {
           const existing = JSON.parse(firstRow.dataset.autoMiscItemsBaseline || "[]");
@@ -845,16 +846,16 @@
           // Ignore parse errors
         }
         
-        const newBaseline = baseline.concat(
-          autoItemsForThisRow.map(item => ({
-            description: item.description,
-            price: item.price,
-            quantity: Number(item.quantity || 1),
-            partIndex: item.partIndex,
-            manual: false
-          }))
-        );
+        // Store baseline with quantity = 1 for each item (not multiplied by rowQty)
+        const baselineItemsForThisRow = miscItems.map(item => ({
+          description: item.description,
+          price: item.price,
+          quantity: 1,  // BASELINE: always 1, will be multiplied by actual part qty
+          partIndex: rowIndex,
+          manual: false
+        }));
         
+        const newBaseline = baseline.concat(baselineItemsForThisRow);
         firstRow.dataset.autoMiscItemsBaseline = JSON.stringify(newBaseline);
       }
       
@@ -983,9 +984,8 @@
             try {
               const baseline = JSON.parse(baselineStr);
               const items = JSON.parse(firstMiscInput.value || "[]");
-              const manualItems = items.filter(item => item.manual === true);
               
-              // Recalculate items for this row
+              // Recalculate items for this row based on baseline
               const baselineForThisRow = baseline.filter(item => item.partIndex === rowIndex);
               if (baselineForThisRow.length > 0) {
                 // Multiply baseline items by new quantity
@@ -997,12 +997,15 @@
                   manual: false
                 }));
                 
-                // Remove old items for this row and keep all other items
-                const otherAutoItems = items.filter(item => 
+                // Remove old items for this row and keep all other items (manual + other rows)
+                const otherItems = items.filter(item => 
                   item.manual === true || item.partIndex !== rowIndex
                 );
-                const allItems = [...otherAutoItems, ...adjusted];
+                const allItems = [...otherItems, ...adjusted];
                 firstMiscInput.value = JSON.stringify(allItems);
+                
+                // Mark that we need to re-render the misc charges table
+                blockEl.dataset.shouldReRenderMiscTable = "true";
               }
             } catch (err) {
               // JSON parse error, ignore
@@ -1013,7 +1016,14 @@
 
       const blockEl = t.closest(".wo-labor");
       if (!blockEl) return;
+      
       recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+      
+      // Re-render misc charges table if qty was changed (to show updated quantities)
+      if (blockEl.dataset.shouldReRenderMiscTable === "true") {
+        renderMiscChargesTable(blockEl);
+        delete blockEl.dataset.shouldReRenderMiscTable;
+      }
     });
 
     blocksContainer.addEventListener("click", function (e) {
