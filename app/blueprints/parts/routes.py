@@ -9,6 +9,7 @@ from flask import request, redirect, url_for, flash, session, jsonify
 from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
+from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.parts_search import build_parts_search_terms, build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
 
@@ -170,10 +171,15 @@ def parts_page():
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("main.dashboard"))
 
+    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+
     # 1) Parts in stock
-    parts_in_stock = list(
-        parts_coll.find({"is_active": True, "in_stock": {"$gt": 0}})
-        .sort([("part_number", 1), ("description", 1), ("created_at", -1)])
+    parts_in_stock, pagination = paginate_find(
+        parts_coll,
+        {"is_active": True, "in_stock": {"$gt": 0}},
+        [("part_number", 1), ("description", 1), ("created_at", -1)],
+        page,
+        per_page,
     )
 
     # 2) Reference lists for modal selects
@@ -222,6 +228,7 @@ def parts_page():
         "public/parts.html",
         active_page="parts",
         parts=parts_in_stock,
+        pagination=pagination,
         vendors=vendors,
         categories=categories,
         locations=locations,

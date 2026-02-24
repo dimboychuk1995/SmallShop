@@ -25,6 +25,7 @@ from app.utils.auth import (
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 from app.utils.layout import build_app_layout_context
+from app.utils.pagination import get_pagination_params, paginate_find
 
 
 # -----------------------------
@@ -202,11 +203,34 @@ def parts_settings_index():
         )
 
     # ✅ ALWAYS filter by active shop_id
-    parts_locations = list(
-        sdb.parts_locations.find({"shop_id": shop_oid}).sort([("name", 1), ("created_at", 1)])
+    loc_page, loc_per_page = get_pagination_params(
+        request.args,
+        default_per_page=20,
+        max_per_page=100,
+        page_key="loc_page",
+        per_page_key="loc_per_page",
     )
-    parts_categories = list(
-        sdb.parts_categories.find({"shop_id": shop_oid}).sort([("name", 1), ("created_at", 1)])
+    cat_page, cat_per_page = get_pagination_params(
+        request.args,
+        default_per_page=20,
+        max_per_page=100,
+        page_key="cat_page",
+        per_page_key="cat_per_page",
+    )
+
+    parts_locations, pagination_locations = paginate_find(
+        sdb.parts_locations,
+        {"shop_id": shop_oid},
+        [("name", 1), ("created_at", 1)],
+        loc_page,
+        loc_per_page,
+    )
+    parts_categories, pagination_categories = paginate_find(
+        sdb.parts_categories,
+        {"shop_id": shop_oid},
+        [("name", 1), ("created_at", 1)],
+        cat_page,
+        cat_per_page,
     )
 
     # ✅ Load pricing rules from shop DB
@@ -227,6 +251,8 @@ def parts_settings_index():
         current_user=current_user,
         parts_locations=parts_locations,
         parts_categories=parts_categories,
+        pagination_locations=pagination_locations,
+        pagination_categories=pagination_categories,
         edit_location_id=edit_location_id,
         edit_category_id=edit_category_id,
         pricing_mode=pricing_mode,

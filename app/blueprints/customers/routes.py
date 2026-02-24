@@ -13,6 +13,7 @@ from app.utils.auth import (
     SESSION_TENANT_ID,
     SESSION_USER_ID,
 )
+from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.permissions import permission_required
 
 
@@ -91,14 +92,20 @@ def customers_page():
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("main.dashboard"))
 
-    customers = list(
-        coll.find({}).sort([("is_active", -1), ("company_name", 1), ("last_name", 1), ("first_name", 1), ("created_at", -1)])
+    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+    customers, pagination = paginate_find(
+        coll,
+        {},
+        [("is_active", -1), ("company_name", 1), ("last_name", 1), ("first_name", 1), ("created_at", -1)],
+        page,
+        per_page,
     )
 
     return _render_app_page(
         "public/customers.html",
         active_page="customers",
         customers=customers,
+        pagination=pagination,
     )
 
 

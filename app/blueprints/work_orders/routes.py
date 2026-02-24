@@ -8,6 +8,7 @@ from app.blueprints.work_orders import work_orders_bp
 from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
+from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.parts_search import build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
 
@@ -186,9 +187,13 @@ def format_dt_label(dt):
     return "-"
 
 
-def get_work_orders_list(shop_db, shop_id: ObjectId):
-    rows = list(
-        shop_db.work_orders.find({"shop_id": shop_id, "is_active": True}).sort([("created_at", -1)]).limit(500)
+def get_work_orders_list(shop_db, shop_id: ObjectId, page: int, per_page: int):
+    rows, pagination = paginate_find(
+        shop_db.work_orders,
+        {"shop_id": shop_id, "is_active": True},
+        [("created_at", -1)],
+        page,
+        per_page,
     )
 
     customer_ids = [x.get("customer_id") for x in rows if x.get("customer_id")]
@@ -227,7 +232,7 @@ def get_work_orders_list(shop_db, shop_id: ObjectId):
             }
         )
 
-    return items
+    return items, pagination
 
 
 def current_user_id():
@@ -440,11 +445,13 @@ def work_orders_page():
         flash("Shop database not configured.", "error")
         return redirect(url_for("main.dashboard"))
 
-    work_orders = get_work_orders_list(shop_db, shop["_id"])
+    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+    work_orders, pagination = get_work_orders_list(shop_db, shop["_id"], page, per_page)
     return _render_app_page(
         "public/work_orders/work_orders.html",
         active_page="work_orders",
         work_orders=work_orders,
+        pagination=pagination,
     )
 
 

@@ -17,6 +17,7 @@ from app.utils.auth import (
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 from app.utils.layout import build_app_layout_context
+from app.utils.pagination import get_pagination_params, paginate_find
 
 
 # -----------------------------
@@ -149,8 +150,13 @@ def users_index():
 
     tenant_values = _id_variants(tenant_from_user)
 
-    users = list(
-        master.users.find({"tenant_id": {"$in": tenant_values}}).sort("created_at", -1)
+    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+    users, pagination = paginate_find(
+        master.users,
+        {"tenant_id": {"$in": tenant_values}},
+        [("created_at", -1)],
+        page,
+        per_page,
     )
 
     # ✅ шапы для чекбоксов (только текущий tenant)
@@ -159,6 +165,7 @@ def users_index():
     return _render_settings_page(
         "public/settings/users.html",
         users=users,
+        pagination=pagination,
         shops_for_form=shops_for_form,
         active_shop_id=str(session.get(SESSION_SHOP_ID) or "")  # чтобы в UI pre-check
     )

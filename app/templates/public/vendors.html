@@ -152,6 +152,20 @@
       <p class="text-muted small mt-2 mb-0">
         Showing {{ vendors|length }} vendor{{ 's' if vendors|length != 1 else '' }}.
       </p>
+
+      {% if pagination and pagination.pages > 1 %}
+        <div class="d-flex align-items-center justify-content-between mt-3">
+          <div class="small text-muted">
+            Page {{ pagination.page }} of {{ pagination.pages }} · {{ pagination.total }} total
+          </div>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Vendors pagination">
+            <a class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
+               href="{{ url_for('vendors.vendors_page', page=pagination.prev_page, per_page=pagination.per_page) }}">Prev</a>
+            <a class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
+               href="{{ url_for('vendors.vendors_page', page=pagination.next_page, per_page=pagination.per_page) }}">Next</a>
+          </div>
+        </div>
+      {% endif %}
     {% else %}
       <p class="text-muted mb-0">No vendors yet.</p>
     {% endif %}

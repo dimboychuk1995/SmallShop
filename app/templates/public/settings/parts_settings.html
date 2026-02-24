@@ -82,6 +82,20 @@
               </tbody>
             </table>
           </div>
+
+          {% if pagination_locations and pagination_locations.pages > 1 %}
+            <div class="d-flex align-items-center justify-content-between mt-2">
+              <div class="small text-muted">
+                Page {{ pagination_locations.page }} of {{ pagination_locations.pages }} · {{ pagination_locations.total }} total
+              </div>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Locations pagination">
+                <a class="btn btn-outline-secondary {% if not pagination_locations.has_prev %}disabled{% endif %}"
+                   href="{{ url_for('settings.parts_settings_index', loc_page=pagination_locations.prev_page, loc_per_page=pagination_locations.per_page, cat_page=request.args.get('cat_page', 1), cat_per_page=request.args.get('cat_per_page', 20), edit_location_id=edit_location_id, edit_category_id=edit_category_id) }}">Prev</a>
+                <a class="btn btn-outline-secondary {% if not pagination_locations.has_next %}disabled{% endif %}"
+                   href="{{ url_for('settings.parts_settings_index', loc_page=pagination_locations.next_page, loc_per_page=pagination_locations.per_page, cat_page=request.args.get('cat_page', 1), cat_per_page=request.args.get('cat_per_page', 20), edit_location_id=edit_location_id, edit_category_id=edit_category_id) }}">Next</a>
+              </div>
+            </div>
+          {% endif %}
         {% else %}
           <div class="text-muted">No locations yet.</div>
         {% endif %}
@@ -150,6 +164,20 @@
               </tbody>
             </table>
           </div>
+
+          {% if pagination_categories and pagination_categories.pages > 1 %}
+            <div class="d-flex align-items-center justify-content-between mt-2">
+              <div class="small text-muted">
+                Page {{ pagination_categories.page }} of {{ pagination_categories.pages }} · {{ pagination_categories.total }} total
+              </div>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Categories pagination">
+                <a class="btn btn-outline-secondary {% if not pagination_categories.has_prev %}disabled{% endif %}"
+                   href="{{ url_for('settings.parts_settings_index', cat_page=pagination_categories.prev_page, cat_per_page=pagination_categories.per_page, loc_page=request.args.get('loc_page', 1), loc_per_page=request.args.get('loc_per_page', 20), edit_location_id=edit_location_id, edit_category_id=edit_category_id) }}">Prev</a>
+                <a class="btn btn-outline-secondary {% if not pagination_categories.has_next %}disabled{% endif %}"
+                   href="{{ url_for('settings.parts_settings_index', cat_page=pagination_categories.next_page, cat_per_page=pagination_categories.per_page, loc_page=request.args.get('loc_page', 1), loc_per_page=request.args.get('loc_per_page', 20), edit_location_id=edit_location_id, edit_category_id=edit_category_id) }}">Next</a>
+              </div>
+            </div>
+          {% endif %}
         {% else %}
           <div class="text-muted">No categories yet.</div>
         {% endif %}

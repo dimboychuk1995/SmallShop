@@ -74,6 +74,20 @@
           </tbody>
         </table>
       </div>
+
+      {% if pagination and pagination.pages > 1 %}
+        <div class="d-flex align-items-center justify-content-between mt-3">
+          <div class="small text-muted">
+            Page {{ pagination.page }} of {{ pagination.pages }} · {{ pagination.total }} total
+          </div>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Customers pagination">
+            <a class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
+               href="{{ url_for('customers.customers_page', page=pagination.prev_page, per_page=pagination.per_page) }}">Prev</a>
+            <a class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
+               href="{{ url_for('customers.customers_page', page=pagination.next_page, per_page=pagination.per_page) }}">Next</a>
+          </div>
+        </div>
+      {% endif %}
     {% else %}
       <div class="text-muted">No customers yet.</div>
     {% endif %}
