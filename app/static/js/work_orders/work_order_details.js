@@ -726,11 +726,46 @@
   }
 
   async function fetchVinDetails(vin) {
-    const url = `/work_orders/api/vin?vin=${encodeURIComponent(vin)}`;
-    const res = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && data.ok ? data : null;
+    try {
+      const url = `/work_orders/api/vin?vin=${encodeURIComponent(vin)}`;
+      console.log("[VIN] Fetching details for:", vin);
+      const res = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!res.ok) {
+        console.error("[VIN] Response not OK:", res.status);
+        // Show error message to user
+        if (res.status === 401 || res.status === 403) {
+          toast("Error: Not authorized to lookup VIN");
+        } else if (res.status >= 500) {
+          toast("Server error while looking up VIN");
+        }
+        return null;
+      }
+      const data = await res.json();
+      console.log("[VIN] Received data:", data);
+      
+      // Check if API returned an error
+      if (data && !data.ok) {
+        console.warn("[VIN] API returned error:", data.error);
+        if (data.error === "vin_length") {
+          // Don't show error - validation happens on input
+        } else if (data.error === "vin_invalid_chars") {
+          toast(data.message || "VIN cannot contain I, O, or Q characters");
+        } else if (data.error === "vin_lookup_failed") {
+          toast(data.message || "Failed to lookup VIN. Please try again later.");
+        } else if (data.error === "vin_no_results") {
+          toast(data.message || "No information found for this VIN number.");
+        } else if (data.error === "vin_invalid") {
+          toast(data.message || "Invalid VIN number");
+        }
+        return null;
+      }
+      
+      return data && data.ok ? data : null;
+    } catch (err) {
+      console.error("[VIN] Error fetching VIN details:", err);
+      toast("Network error while looking up VIN. Please check your connection.");
+      return null;
+    }
   }
 
   function ensureDropdown() {
@@ -1508,6 +1543,7 @@
     const unitModelInput = $("unitModelInput");
     const unitYearInput = $("unitYearInput");
     const unitTypeInput = $("unitTypeInput");
+    const vinLoadingSpinner = $("vinLoadingSpinner");
 
     const els = {
       editor, customerSel, unitSel, addUnitBtn, addLaborBtn,
@@ -1518,17 +1554,84 @@
     const debouncedVinLookup = debounce(async function () {
       if (!unitVinInput) return;
       const vin = String(unitVinInput.value || "").trim().toUpperCase();
-      if (vin.length !== 17) return;
-      if (vin === lastVinLookup) return;
+      
+      // Update input to uppercase
+      if (unitVinInput.value !== vin) {
+        unitVinInput.value = vin;
+      }
+      
+      if (vin.length !== 17) {
+        console.log("[VIN] Invalid length:", vin.length);
+        if (vinLoadingSpinner) vinLoadingSpinner.style.display = "none";
+        return;
+      }
+      
+      if (vin === lastVinLookup) {
+        console.log("[VIN] Already looked up:", vin);
+        return;
+      }
+      
       lastVinLookup = vin;
+      console.log("[VIN] Starting lookup for:", vin);
+
+      // Show loading spinner
+      if (vinLoadingSpinner) vinLoadingSpinner.style.display = "block";
+
+      // Add visual feedback
+      if (unitVinInput) {
+        unitVinInput.style.borderColor = "#0d6efd";
+        unitVinInput.style.backgroundColor = "#e7f1ff";
+      }
 
       const data = await fetchVinDetails(vin);
-      if (!data) return;
+      
+      // Hide loading spinner
+      if (vinLoadingSpinner) vinLoadingSpinner.style.display = "none";
+      
+      // Remove visual feedback
+      if (unitVinInput) {
+        unitVinInput.style.borderColor = "";
+        unitVinInput.style.backgroundColor = "";
+      }
+      
+      if (!data) {
+        console.warn("[VIN] No data received for:", vin);
+        // Show error state
+        if (unitVinInput) {
+          unitVinInput.style.borderColor = "#dc3545";
+          setTimeout(() => {
+            if (unitVinInput) unitVinInput.style.borderColor = "";
+          }, 2000);
+        }
+        return;
+      }
 
-      if (unitMakeInput && data.make) unitMakeInput.value = data.make;
-      if (unitModelInput && data.model) unitModelInput.value = data.model;
-      if (unitYearInput && data.year) unitYearInput.value = data.year;
-      if (unitTypeInput && data.type) unitTypeInput.value = data.type;
+      console.log("[VIN] Autofilling fields with data:", data);
+      
+      if (unitMakeInput && data.make) {
+        unitMakeInput.value = data.make;
+        console.log("[VIN] Set Make:", data.make);
+      }
+      if (unitModelInput && data.model) {
+        unitModelInput.value = data.model;
+        console.log("[VIN] Set Model:", data.model);
+      }
+      if (unitYearInput && data.year) {
+        unitYearInput.value = data.year;
+        console.log("[VIN] Set Year:", data.year);
+      }
+      if (unitTypeInput && data.type) {
+        unitTypeInput.value = data.type;
+        console.log("[VIN] Set Type:", data.type);
+      }
+      
+      // Flash success
+      if (unitVinInput) {
+        unitVinInput.style.borderColor = "#198754";
+        setTimeout(() => {
+          if (unitVinInput) unitVinInput.style.borderColor = "";
+        }, 1500);
+      }
     }, 500);
 
     function setEditorEnabled(enabled) {
