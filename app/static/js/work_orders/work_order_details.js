@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  let coreChargeDefaultEnabled = true;
+
   function $(id) { return document.getElementById(id); }
 
   function readJsonScript(id, fallback) {
@@ -265,7 +267,15 @@
         <div class="small text-muted mt-1 part-charges-meta"></div>
       </td>
       <td><input class="form-control form-control-sm part-price" name="labors[${laborIndex}][parts][${rowIndex}][price]" value="" inputmode="decimal"></td>
-      <td class="part-line-total"><span class="text-muted">—</span></td>
+      <td class="part-line-total">
+        <div class="d-flex align-items-center gap-2">
+          <div class="part-line-total-value"><span class="text-muted">—</span></div>
+          <div class="form-check form-switch part-core-toggle-wrapper" style="display: none; margin: 0;">
+            <input class="form-check-input part-core-toggle" type="checkbox">
+            <label class="form-check-label small text-muted" style="margin-bottom: 0;">Core</label>
+          </div>
+        </div>
+      </td>
     `;
     return tr;
   }
@@ -306,29 +316,54 @@
     }
   }
 
+  function isCoreChargeEnabled(tr) {
+    const toggle = tr.querySelector(".part-core-toggle");
+    if (!toggle) return true;
+    return !!toggle.checked;
+  }
+
   function getRowCharges(tr) {
     const coreRaw = toNum(tr.querySelector(".part-core-charge")?.value);
     const miscRaw = toNum(tr.querySelector(".part-misc-charge")?.value);
 
-    const coreCharge = Number.isFinite(coreRaw) && coreRaw > 0 ? round2(coreRaw) : 0;
+    const coreCharge = (isCoreChargeEnabled(tr) && Number.isFinite(coreRaw) && coreRaw > 0)
+      ? round2(coreRaw)
+      : 0;
     const miscCharge = Number.isFinite(miscRaw) && miscRaw > 0 ? round2(miscRaw) : 0;
     return { coreCharge, miscCharge };
   }
 
   function setRowChargesMeta(tr) {
     const metaEl = tr.querySelector(".part-charges-meta");
-    if (!metaEl) return;
-    const { coreCharge } = getRowCharges(tr);
-    if (coreCharge <= 0) {
-      metaEl.textContent = "";
-      return;
+    if (metaEl) metaEl.textContent = "";
+  }
+
+  function syncCoreChargeFromToggle(tr) {
+    const toggle = tr.querySelector(".part-core-toggle");
+    const coreInput = tr.querySelector(".part-core-charge");
+    if (!toggle || !coreInput) return;
+
+    const current = toNum(coreInput.value);
+    const base = toNum(tr.dataset.coreChargeBase);
+
+    if (toggle.checked) {
+      const restored = Number.isFinite(base) ? base : (Number.isFinite(current) ? current : 0);
+      coreInput.value = String(restored || 0);
+      if (!Number.isFinite(base) && restored > 0) tr.dataset.coreChargeBase = String(restored);
+    } else {
+      if (Number.isFinite(current) && current > 0) tr.dataset.coreChargeBase = String(current);
+      coreInput.value = "0";
     }
-    metaEl.textContent = `Core: $${money(coreCharge)}`;
   }
 
   function clearRowCalc(tr) {
     const lineCell = tr.querySelector(".part-line-total");
-    if (lineCell) lineCell.innerHTML = `<span class="text-muted">—</span>`;
+    if (lineCell) {
+      const valueEl = lineCell.querySelector(".part-line-total-value");
+      if (valueEl) valueEl.innerHTML = `<span class="text-muted">—</span>`;
+      const toggleWrapper = lineCell.querySelector(".part-core-toggle-wrapper");
+      if (toggleWrapper) toggleWrapper.style.display = "none";
+    }
     setRowChargesMeta(tr);
   }
 
@@ -364,10 +399,21 @@
     const unitTotal = round2(price + coreCharge);
     const lt = round2(unitTotal * qty);
     if (lineCell) {
-      const chips = [];
-      if (coreCharge > 0) chips.push(`core $${money(coreCharge)}`);
-      const meta = chips.length ? `<div class="small text-muted">+ ${chips.join(" • ")}</div>` : "";
-      lineCell.innerHTML = `<strong>$${money(lt)}</strong>${meta}`;
+      const valueEl = lineCell.querySelector(".part-line-total-value");
+      if (valueEl) {
+        const coreLine = coreCharge > 0 ? round2(coreCharge * qty) : 0;
+        const coreMeta = coreLine > 0 ? `<div class="small text-muted">+ $${money(coreLine)} core charge</div>` : "";
+        valueEl.innerHTML = `<strong>$${money(lt)}</strong>${coreMeta}`;
+      }
+      const toggleWrapper = lineCell.querySelector(".part-core-toggle-wrapper");
+      const baseCoreCharge = toNum(tr.dataset.coreChargeBase);
+      if (toggleWrapper) {
+        if (Number.isFinite(baseCoreCharge) && baseCoreCharge > 0) {
+          toggleWrapper.style.display = "flex";
+        } else {
+          toggleWrapper.style.display = "none";
+        }
+      }
     }
     return lt;
   }
@@ -940,7 +986,8 @@
       }))
       .filter((x) => x.description);
 
-    if (coreInput) coreInput.value = String(coreCharge);
+    tr.dataset.coreChargeBase = String(coreCharge);
+    if (coreInput) coreInput.value = isCoreChargeEnabled(tr) ? String(coreCharge) : "0";
     if (miscInput) miscInput.value = String(miscCharge);
     if (miscDescriptionInput) {
       // Always store misc charges in the FIRST row of this block
@@ -1004,6 +1051,18 @@
       }
     }
     setRowChargesMeta(tr);
+    syncCoreChargeFromToggle(tr);
+    
+    // Show toggle only if there's a core charge
+    const lineCell = tr.querySelector(".part-line-total");
+    if (lineCell) {
+      const toggleWrapper = lineCell.querySelector(".part-core-toggle-wrapper");
+      if (toggleWrapper && Number.isFinite(coreCharge) && coreCharge > 0) {
+        toggleWrapper.style.display = "flex";
+      } else if (toggleWrapper) {
+        toggleWrapper.style.display = "none";
+      }
+    }
 
     const price = tr.querySelector(".part-price");
     if (price) price.value = "";
@@ -1075,8 +1134,13 @@
     });
     clone.querySelectorAll("tr.parts-row").forEach(tr => {
       delete tr.dataset.autoMiscItemsBaseline;
+      delete tr.dataset.coreChargeBase;
+      const toggle = tr.querySelector(".part-core-toggle");
+      if (toggle) toggle.checked = coreChargeDefaultEnabled;
+      const toggleWrapper = tr.querySelector(".part-core-toggle-wrapper");
+      if (toggleWrapper) toggleWrapper.style.display = "none";
     });
-    clone.querySelectorAll(".part-line-total").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
+    clone.querySelectorAll(".part-line-total-value").forEach(td => td.innerHTML = `<span class="text-muted">—</span>`);
     clone.querySelectorAll(".laborTotalDisplay, .partsTotalDisplay, .laborFullTotalDisplay").forEach(el => el.textContent = "—");
 
     // Clear misc charges table
@@ -1105,13 +1169,29 @@
           const coreInput = tr.querySelector(".part-core-charge");
           const miscInput = tr.querySelector(".part-misc-charge");
           const miscDescriptionInput = tr.querySelector(".part-misc-charge-description");
+          const toggle = tr.querySelector(".part-core-toggle");
           if (coreInput) coreInput.value = "0";
           if (miscInput) miscInput.value = "0";
           if (miscDescriptionInput) miscDescriptionInput.value = "";
+          if (toggle) toggle.checked = coreChargeDefaultEnabled;
           delete tr.dataset.autoMiscItemsBaseline;
+          delete tr.dataset.coreChargeBase;
           setRowChargesMeta(tr);
+          syncCoreChargeFromToggle(tr);
           delete tr.dataset.priceAutofilled;
+          
+          // Hide toggle when core is cleared
+          const lineCell = tr.querySelector(".part-line-total");
+          if (lineCell) {
+            const toggleWrapper = lineCell.querySelector(".part-core-toggle-wrapper");
+            if (toggleWrapper) toggleWrapper.style.display = "none";
+          }
         }
+      }
+
+      if (t.classList?.contains("part-core-toggle")) {
+        const tr = t.closest("tr.parts-row");
+        if (tr) syncCoreChargeFromToggle(tr);
       }
 
       if (!isLaborSyncing && t.classList?.contains("labor-total-input")) {
@@ -1299,10 +1379,27 @@
         tr.querySelector(".part-qty").value = String(p?.qty ?? "");
         tr.querySelector(".part-cost").value = String(p?.cost ?? "");
         tr.querySelector(".part-price").value = String(p?.price ?? "");
-        tr.querySelector(".part-core-charge").value = String(p?.core_charge ?? p?.core_cost ?? 0);
+        const coreValue = toNum(p?.core_charge ?? p?.core_cost ?? 0) || 0;
+        tr.querySelector(".part-core-charge").value = String(coreValue);
         tr.querySelector(".part-misc-charge").value = String(p?.misc_charge ?? 0);
         tr.querySelector(".part-misc-charge-description").value = String(p?.misc_charge_description ?? "");
+        tr.dataset.coreChargeBase = String(coreValue);
+        const toggle = tr.querySelector(".part-core-toggle");
+        if (toggle) toggle.checked = coreValue > 0 ? true : coreChargeDefaultEnabled;
+        syncCoreChargeFromToggle(tr);
         setRowChargesMeta(tr);
+        
+        // Show toggle only if there's a core charge
+        const lineCell = tr.querySelector(".part-line-total");
+        if (lineCell) {
+          const toggleWrapper = lineCell.querySelector(".part-core-toggle-wrapper");
+          if (toggleWrapper && Number.isFinite(coreValue) && coreValue > 0) {
+            toggleWrapper.style.display = "flex";
+          } else if (toggleWrapper) {
+            toggleWrapper.style.display = "none";
+          }
+        }
+        
         if (String(p?.price ?? "").trim()) tr.dataset.priceAutofilled = "1";
         tbody.appendChild(tr);
       });
@@ -1590,12 +1687,20 @@
     const mechanicsData = readJsonScript("mechanicsData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
     const shopSupplyData = readJsonScript("shopSupplyData", { percentage: 0 });
+    const coreChargeData = readJsonScript("coreChargeDefaultData", { enabled: true });
     const totalsSnapshot = readJsonScript("workOrderInitialTotalsData", {});
 
     const shopSupplyPct = toNum(shopSupplyData?.percentage ?? shopSupplyData) || 0;
+    coreChargeDefaultEnabled = !!coreChargeData?.enabled;
 
     const blocksContainer = $("laborsContainer");
     if (!blocksContainer) return;
+
+    blocksContainer.querySelectorAll("tr.parts-row").forEach((tr) => {
+      const toggle = tr.querySelector(".part-core-toggle");
+      if (toggle) toggle.checked = coreChargeDefaultEnabled;
+      syncCoreChargeFromToggle(tr);
+    });
 
     const customerSel = $("customerSelect");
     const unitSel = $("unitSelect");

@@ -121,6 +121,7 @@
     <script type="application/json" id="mechanicsData">{{ mechanics|tojson }}</script>
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
     <script type="application/json" id="shopSupplyData">{{ {"percentage": shop_supply_procentage}|tojson }}</script>
+    <script type="application/json" id="coreChargeDefaultData">{{ {"enabled": charge_for_cores_default}|tojson }}</script>
     <script type="application/json" id="workOrderInitialData">{{ (initial_labors or [])|tojson }}</script>
     <script type="application/json" id="workOrderInitialTotalsData">{{ (initial_totals or {})|tojson }}</script>
     <script type="application/json" id="workOrderCreatedData">{{ {"created": work_order_created, "id": created_work_order_id, "status": work_order_status}|tojson }}</script>
@@ -239,7 +240,6 @@
                         <th>Description</th>
                         <th style="width:10%;">Count</th>
                         <th style="width:14%;">Cost</th>
-                        <th style="width:10%;">Core</th>
                         <th style="width:14%;">Price</th>
                         <th style="width:14%;">Line Total</th>
                       </tr>
@@ -259,11 +259,16 @@
                           <input class="form-control form-control-sm part-cost" name="labors[0][parts][0][cost]" inputmode="decimal" readonly tabindex="-1">
                           <div class="small text-muted mt-1 part-charges-meta"></div>
                         </td>
-                        <td>
-                          <input class="form-control form-control-sm part-core-display" value="" readonly tabindex="-1">
-                        </td>
                         <td><input class="form-control form-control-sm part-price" name="labors[0][parts][0][price]" value="" inputmode="decimal"></td>
-                        <td class="part-line-total"><span class="text-muted">—</span></td>
+                        <td class="part-line-total">
+                          <div class="d-flex align-items-center gap-2">
+                            <div class="part-line-total-value"><span class="text-muted">—</span></div>
+                            <div class="form-check form-switch part-core-toggle-wrapper" style="display: none; margin: 0;">
+                              <input class="form-check-input part-core-toggle" type="checkbox">
+                              <label class="form-check-label small text-muted" style="margin-bottom: 0;">Core</label>
+                            </div>
+                          </div>
+                        </td>
                       </tr>
                     </tbody>
 

@@ -550,6 +550,13 @@ def get_shop_supply_percentage(shop_db, shop_id: ObjectId) -> float:
         return 0.0
 
 
+def get_core_charge_default(shop_db, shop_id: ObjectId) -> bool:
+    doc = shop_db.core_charge_rules.find_one({"shop_id": shop_id})
+    if not doc:
+        doc = shop_db.core_charge_rules.find_one({}) or {}
+    return bool(doc.get("charge_for_cores_default", True))
+
+
 def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
     customers = get_customers(shop_db)
     mechanics = get_assignable_mechanics(shop)
@@ -570,6 +577,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "mechanics": mechanics,
         "parts_pricing_rules": get_pricing_rules_json(shop_db, shop["_id"]),
         "shop_supply_procentage": get_shop_supply_percentage(shop_db, shop["_id"]),
+        "charge_for_cores_default": get_core_charge_default(shop_db, shop["_id"]),
 
         # старые поля (оставляем как у тебя было)
         "labor_description": (form_state or {}).get("labor_description") or "",
