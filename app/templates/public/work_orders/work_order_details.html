@@ -118,6 +118,7 @@
     <!-- Data for JS -->
     <script type="application/json" id="customersData">{{ customers|tojson }}</script>
     <script type="application/json" id="laborRatesData">{{ labor_rates|tojson }}</script>
+    <script type="application/json" id="mechanicsData">{{ mechanics|tojson }}</script>
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
     <script type="application/json" id="shopSupplyData">{{ {"percentage": shop_supply_procentage}|tojson }}</script>
     <script type="application/json" id="workOrderDraftData">{{ (draft_labors or draft_blocks or [])|tojson }}</script>
@@ -165,6 +166,7 @@
               <div class="d-flex justify-content-between align-items-center">
                 <div>
                   <h2 class="h6 mb-0">Labor <span class="labor-number">1</span></h2>
+                  <div class="text-muted small mt-1 laborAssignSummary">Assigned: —</div>
                   <div class="text-muted small mt-1">
                     Labor: <strong class="laborTotalDisplay">—</strong>
                     &nbsp;|&nbsp;
@@ -186,10 +188,17 @@
                   </div>
                 </div>
 
-                <button type="button" class="btn btn-outline-danger btn-sm removeLaborBtn" disabled>
-                  Remove
-                </button>
+                <div class="d-flex gap-2">
+                  <button type="button" class="btn btn-outline-secondary btn-sm laborAssignBtn">
+                    Assign
+                  </button>
+                  <button type="button" class="btn btn-outline-danger btn-sm removeLaborBtn" disabled>
+                    Remove
+                  </button>
+                </div>
               </div>
+
+              <input type="hidden" class="labor-assignments-json" name="labors[0][assigned_mechanics_json]" value="[]">
 
               <hr class="my-3"/>
 
@@ -331,6 +340,44 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
             <button type="button" id="miscChargeAddBtn" class="btn btn-primary">Add Charge</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assign Mechanics Modal -->
+    <div class="modal fade" id="assignMechanicsModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Assign Mechanics</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+
+          <div class="modal-body">
+            <div id="assignMechanicsEmpty" class="alert alert-warning" style="display:none;">
+              No mechanics available for this shop.
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-sm align-middle" id="assignMechanicsTable">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width:8%;">Use</th>
+                    <th>Mechanic</th>
+                    <th style="width:22%;">Role</th>
+                    <th style="width:20%;">Percent</th>
+                  </tr>
+                </thead>
+                <tbody id="assignMechanicsTbody"></tbody>
+              </table>
+            </div>
+            <div id="assignMechanicsError" class="text-danger small mt-2" style="display:none;"></div>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" id="assignMechanicsSaveBtn" class="btn btn-primary">Save Assignment</button>
           </div>
         </div>
       </div>

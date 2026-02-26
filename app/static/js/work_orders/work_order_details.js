@@ -68,6 +68,69 @@
     return round2(cost / denom);
   }
 
+  function normalizeAssignedMechanics(raw) {
+    if (!Array.isArray(raw)) return [];
+
+    const out = [];
+    const seen = new Set();
+    raw.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const userId = String(item.user_id || item.id || "").trim();
+      if (!userId || seen.has(userId)) return;
+      const percent = toNum(item.percent);
+      out.push({
+        user_id: userId,
+        name: String(item.name || "").trim(),
+        role: String(item.role || "").trim(),
+        percent: Number.isFinite(percent) ? round2(percent) : 0,
+      });
+      seen.add(userId);
+    });
+
+    if (out.length === 1 && (!Number.isFinite(out[0].percent) || out[0].percent <= 0)) {
+      out[0].percent = 100;
+    }
+
+    return out;
+  }
+
+  function getLaborAssignments(blockEl) {
+    const input = blockEl?.querySelector(".labor-assignments-json");
+    if (!input) return [];
+    try {
+      return normalizeAssignedMechanics(JSON.parse(input.value || "[]"));
+    } catch {
+      return [];
+    }
+  }
+
+  function updateLaborAssignSummary(blockEl) {
+    const summaryEl = blockEl?.querySelector(".laborAssignSummary");
+    if (!summaryEl) return;
+    const assignments = getLaborAssignments(blockEl);
+    if (!assignments.length) {
+      summaryEl.textContent = "Assigned: —";
+      return;
+    }
+
+    const names = assignments
+      .map((a) => {
+        const name = String(a.name || "").trim() || "Mechanic";
+        const pct = Number.isFinite(toNum(a.percent)) ? `${round2(toNum(a.percent))}%` : "0%";
+        return `${name} (${pct})`;
+      })
+      .join(", ");
+    summaryEl.textContent = `Assigned: ${names}`;
+  }
+
+  function setLaborAssignments(blockEl, assignments) {
+    const input = blockEl?.querySelector(".labor-assignments-json");
+    if (!input) return;
+    const normalized = normalizeAssignedMechanics(assignments);
+    input.value = JSON.stringify(normalized);
+    updateLaborAssignSummary(blockEl);
+  }
+
   // ---------------- labor ----------------
   function getHourlyRate(rates, code) {
     if (!Array.isArray(rates) || !code) return null;
@@ -972,6 +1035,8 @@
     blockEl.querySelector(".labor-rate").name = `labors[${idx}][labor_rate_code]`;
     const laborTotalInput = blockEl.querySelector(".labor-total-input");
     if (laborTotalInput) laborTotalInput.name = `labors[${idx}][labor_total_ui]`;
+    const laborAssignmentsInput = blockEl.querySelector(".labor-assignments-json");
+    if (laborAssignmentsInput) laborAssignmentsInput.name = `labors[${idx}][assigned_mechanics_json]`;
 
     const tbody = blockEl.querySelector(".partsTbody");
     const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
@@ -995,6 +1060,12 @@
 
     clone.querySelectorAll("input").forEach(i => {
       i.value = "";
+    });
+    clone.querySelectorAll(".labor-assignments-json").forEach(i => {
+      i.value = "[]";
+    });
+    clone.querySelectorAll(".laborAssignSummary").forEach(el => {
+      el.textContent = "Assigned: —";
     });
     clone.querySelectorAll(".part-core-charge, .part-misc-charge").forEach(i => {
       i.value = "0";
@@ -1205,6 +1276,11 @@
       if (lh) lh.value = String(laborHours ?? "");
       if (lr) lr.value = String(laborRate ?? "");
 
+      const assignments = normalizeAssignedMechanics(
+        b?.labor?.assigned_mechanics ?? b?.assigned_mechanics ?? []
+      );
+      setLaborAssignments(el, assignments);
+
       const tbody = el.querySelector(".partsTbody");
       if (!tbody) return;
 
@@ -1235,6 +1311,7 @@
     });
 
     Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
+    Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b) => updateLaborAssignSummary(b));
   }
 
   // ---------------- serialize current UI -> blocks[] ----------------
@@ -1246,6 +1323,7 @@
       const labor_description = String(bEl.querySelector(".labor-description")?.value || "").trim();
       const labor_hours = String(bEl.querySelector(".labor-hours")?.value || "").trim();
       const labor_rate_code = String(bEl.querySelector(".labor-rate")?.value || "").trim();
+      const assigned_mechanics = getLaborAssignments(bEl);
 
       const parts = [];
       const rows = Array.from(bEl.querySelectorAll("tbody.partsTbody tr.parts-row"));
@@ -1275,6 +1353,7 @@
         labor_description,
         labor_hours: labor_hours === "" ? 0 : Number(labor_hours),
         labor_rate_code,
+        assigned_mechanics,
         parts,
       });
     });
@@ -1508,6 +1587,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     const customersData = readJsonScript("customersData", []);
     const laborRates = readJsonScript("laborRatesData", []);
+    const mechanicsData = readJsonScript("mechanicsData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
     const shopSupplyData = readJsonScript("shopSupplyData", { percentage: 0 });
     const totalsSnapshot = readJsonScript("workOrderTotalsData", {});
@@ -1545,10 +1625,123 @@
     const unitTypeInput = $("unitTypeInput");
     const vinLoadingSpinner = $("vinLoadingSpinner");
 
+    const assignMechanicsModal = $("assignMechanicsModal");
+    const assignMechanicsTbody = $("assignMechanicsTbody");
+    const assignMechanicsEmpty = $("assignMechanicsEmpty");
+    const assignMechanicsError = $("assignMechanicsError");
+    const assignMechanicsSaveBtn = $("assignMechanicsSaveBtn");
+
     const els = {
       editor, customerSel, unitSel, addUnitBtn, addLaborBtn,
       createBtn, editBtn, saveBtn, paidBtn, unpaidBtn
     };
+
+    let targetAssignBlock = null;
+
+    function setAssignError(message) {
+      if (!assignMechanicsError) return;
+      const text = String(message || "").trim();
+      assignMechanicsError.textContent = text;
+      assignMechanicsError.style.display = text ? "" : "none";
+    }
+
+    function renderAssignMechanicsRows(blockEl) {
+      if (!assignMechanicsTbody) return;
+      const assigned = getLaborAssignments(blockEl);
+      const assignedMap = new Map(assigned.map((a) => [String(a.user_id), a]));
+
+      assignMechanicsTbody.innerHTML = "";
+
+      if (!Array.isArray(mechanicsData) || mechanicsData.length === 0) {
+        if (assignMechanicsEmpty) assignMechanicsEmpty.style.display = "";
+        if (assignMechanicsSaveBtn) assignMechanicsSaveBtn.disabled = true;
+        return;
+      }
+
+      if (assignMechanicsEmpty) assignMechanicsEmpty.style.display = "none";
+      if (assignMechanicsSaveBtn) assignMechanicsSaveBtn.disabled = false;
+
+      mechanicsData.forEach((m) => {
+        const id = String(m?.id || "").trim();
+        if (!id) return;
+
+        const existing = assignedMap.get(id);
+        const isChecked = !!existing;
+        const percent = isChecked
+          ? (Number.isFinite(toNum(existing.percent)) ? round2(toNum(existing.percent)) : "")
+          : "";
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>
+            <input type="checkbox" class="form-check-input mechanic-check" data-id="${escapeText(id)}" ${isChecked ? "checked" : ""}>
+          </td>
+          <td>${escapeText(String(m?.name || ""))}</td>
+          <td>${escapeText(String(m?.role || ""))}</td>
+          <td>
+            <input type="number" class="form-control form-control-sm mechanic-percent" min="0" max="100" step="0.01" value="${escapeText(String(percent))}" ${isChecked ? "" : "disabled"}>
+          </td>
+        `;
+        assignMechanicsTbody.appendChild(tr);
+      });
+
+      updateAssignPercentInputs(false);
+    }
+
+    function updateAssignPercentInputs(autoDistribute) {
+      if (!assignMechanicsTbody) return;
+
+      const rows = Array.from(assignMechanicsTbody.querySelectorAll("tr"));
+      const selectedRows = rows.filter((tr) => tr.querySelector(".mechanic-check")?.checked);
+
+      rows.forEach((tr) => {
+        const check = tr.querySelector(".mechanic-check");
+        const percentInput = tr.querySelector(".mechanic-percent");
+        if (!check || !percentInput) return;
+
+        if (!check.checked) {
+          percentInput.disabled = true;
+          percentInput.value = "";
+          return;
+        }
+
+        if (selectedRows.length <= 1) {
+          percentInput.disabled = true;
+          percentInput.value = "";
+        } else {
+          percentInput.disabled = false;
+        }
+      });
+
+      if (!autoDistribute || selectedRows.length <= 1) return;
+
+      const totalHundredths = 10000;
+      const count = selectedRows.length;
+      const base = Math.floor(totalHundredths / count);
+      let remainder = totalHundredths - (base * count);
+
+      selectedRows.forEach((tr) => {
+        const percentInput = tr.querySelector(".mechanic-percent");
+        if (!percentInput) return;
+        let valueHundredths = base;
+        if (remainder > 0) {
+          valueHundredths += 1;
+          remainder -= 1;
+        }
+        percentInput.value = String((valueHundredths / 100).toFixed(2));
+      });
+    }
+
+    assignMechanicsTbody?.addEventListener("change", function (e) {
+      const check = e.target?.closest(".mechanic-check");
+      if (!check) return;
+      updateAssignPercentInputs(true);
+      setAssignError("");
+    });
+
+    assignMechanicsTbody?.addEventListener("input", function () {
+      setAssignError("");
+    });
 
     let lastVinLookup = "";
     const debouncedVinLookup = debounce(async function () {
@@ -1856,6 +2049,75 @@
 
     // dropdown
     const dd = ensureDropdown();
+
+    blocksContainer.addEventListener("click", function (e) {
+      const assignBtn = e.target.closest(".laborAssignBtn");
+      if (!assignBtn) return;
+
+      const blockEl = assignBtn.closest(".wo-labor");
+      if (!blockEl) return;
+
+      targetAssignBlock = blockEl;
+      renderAssignMechanicsRows(blockEl);
+      setAssignError("");
+
+      if (assignMechanicsModal && window.bootstrap && window.bootstrap.Modal) {
+        const modal = window.bootstrap.Modal.getOrCreateInstance(assignMechanicsModal);
+        modal.show();
+      }
+    });
+
+    assignMechanicsSaveBtn?.addEventListener("click", function () {
+      if (!targetAssignBlock || !assignMechanicsTbody) return;
+
+      const rows = Array.from(assignMechanicsTbody.querySelectorAll("tr"));
+      const selected = [];
+      rows.forEach((tr) => {
+        const check = tr.querySelector(".mechanic-check");
+        if (!check || !check.checked) return;
+
+        const id = String(check.dataset.id || "").trim();
+        if (!id) return;
+
+        const mechanic = Array.isArray(mechanicsData)
+          ? mechanicsData.find((m) => String(m?.id || "") === id)
+          : null;
+        if (!mechanic) return;
+
+        const percentInput = tr.querySelector(".mechanic-percent");
+        const percent = toNum(percentInput?.value);
+        selected.push({
+          user_id: id,
+          name: String(mechanic?.name || "").trim(),
+          role: String(mechanic?.role || "").trim(),
+          percent: Number.isFinite(percent) ? round2(percent) : 0,
+        });
+      });
+
+      if (selected.length > 1) {
+        const hasZero = selected.some((x) => !Number.isFinite(x.percent) || x.percent <= 0);
+        if (hasZero) {
+          setAssignError("For multiple mechanics, each percent must be greater than 0.");
+          return;
+        }
+        const sum = round2(selected.reduce((acc, x) => acc + x.percent, 0));
+        if (Math.abs(sum - 100) > 0.01) {
+          setAssignError("For multiple mechanics, total percent must equal 100.");
+          return;
+        }
+      }
+
+      if (selected.length === 1 && (!Number.isFinite(selected[0].percent) || selected[0].percent <= 0)) {
+        selected[0].percent = 100;
+      }
+
+      setLaborAssignments(targetAssignBlock, selected);
+
+      if (assignMechanicsModal && window.bootstrap && window.bootstrap.Modal) {
+        const modal = window.bootstrap.Modal.getInstance(assignMechanicsModal);
+        if (modal) modal.hide();
+      }
+    });
 
     dd.addEventListener("mousedown", function (e) {
       const itemEl = e.target.closest(".parts-dd-item");

@@ -128,6 +128,26 @@ def normalize_saved_labors(raw):
             or ""
         ).strip()
 
+        assigned_src = labor_src.get("assigned_mechanics")
+        if not isinstance(assigned_src, list):
+            assigned_src = block.get("assigned_mechanics")
+
+        assigned_mechanics = []
+        for item in (assigned_src or []):
+            if not isinstance(item, dict):
+                continue
+            user_id = str(item.get("user_id") or item.get("id") or "").strip()
+            if not user_id:
+                continue
+            assigned_mechanics.append(
+                {
+                    "user_id": user_id,
+                    "name": str(item.get("name") or "").strip(),
+                    "role": str(item.get("role") or "").strip(),
+                    "percent": round2(item.get("percent")),
+                }
+            )
+
         parts_out = []
         for p in (block.get("parts") or []):
             if not isinstance(p, dict):
@@ -170,6 +190,7 @@ def normalize_saved_labors(raw):
                     "description": labor_description,
                     "hours": labor_hours,
                     "rate_code": labor_rate_code,
+                    "assigned_mechanics": assigned_mechanics,
                 },
                 "parts": parts_out,
             }
@@ -337,6 +358,135 @@ def get_labor_rates(shop_db, shop_id: ObjectId):
     ]
 
 
+def _tenant_variants_from_shop(shop: dict):
+    raw = shop.get("tenant_id")
+    if raw is None:
+        return []
+
+    out = {raw, str(raw)}
+    parsed = oid(raw)
+    if parsed:
+        out.add(parsed)
+    return list(out)
+
+
+def get_assignable_mechanics(shop: dict):
+    shop_id = shop.get("_id")
+    if not shop_id:
+        return []
+
+    tenant_variants = _tenant_variants_from_shop(shop)
+    if not tenant_variants:
+        return []
+
+    shop_variants = [shop_id, str(shop_id)]
+    master = get_master_db()
+    rows = list(
+        master.users.find(
+            {
+                "tenant_id": {"$in": tenant_variants},
+                "is_active": True,
+                "role": {"$in": ["senior_mechanic", "mechanic"]},
+                "$or": [
+                    {"shop_ids": {"$in": shop_variants}},
+                    {"shop_id": {"$in": shop_variants}},
+                ],
+            },
+            {
+                "first_name": 1,
+                "last_name": 1,
+                "name": 1,
+                "email": 1,
+                "role": 1,
+            },
+        ).sort([("first_name", 1), ("last_name", 1), ("name", 1), ("email", 1)])
+    )
+
+    out = []
+    for u in rows:
+        first_name = str(u.get("first_name") or "").strip()
+        last_name = str(u.get("last_name") or "").strip()
+        full_name = f"{first_name} {last_name}".strip()
+        fallback_name = str(u.get("name") or "").strip()
+        email = str(u.get("email") or "").strip()
+        display_name = full_name or fallback_name or email
+        if not display_name:
+            continue
+
+        out.append(
+            {
+                "id": str(u.get("_id")),
+                "name": display_name,
+                "role": str(u.get("role") or "").strip(),
+            }
+        )
+
+    return out
+
+
+def normalize_assigned_mechanics(raw, mechanics_by_id: dict[str, dict]):
+    if not isinstance(raw, list):
+        return []
+
+    out = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+
+        user_id = str(item.get("user_id") or item.get("id") or "").strip()
+        if not user_id or user_id in seen:
+            continue
+
+        mechanic = mechanics_by_id.get(user_id)
+        if not mechanic:
+            continue
+
+        percent = round2(item.get("percent"))
+        if percent < 0:
+            percent = 0.0
+
+        out.append(
+            {
+                "user_id": user_id,
+                "name": mechanic.get("name") or "",
+                "role": mechanic.get("role") or "",
+                "percent": percent,
+            }
+        )
+        seen.add(user_id)
+
+    if len(out) == 1 and out[0].get("percent", 0) <= 0:
+        out[0]["percent"] = 100.0
+
+    return out
+
+
+def apply_assignments_to_labors(labors, mechanics_by_id: dict[str, dict]):
+    if not isinstance(labors, list):
+        return []
+
+    out = []
+    for block in labors:
+        if not isinstance(block, dict):
+            continue
+
+        block_copy = dict(block)
+        labor_src = block_copy.get("labor") if isinstance(block_copy.get("labor"), dict) else None
+        if labor_src is not None:
+            labor_copy = dict(labor_src)
+            normalized = normalize_assigned_mechanics(labor_copy.get("assigned_mechanics"), mechanics_by_id)
+            labor_copy["assigned_mechanics"] = normalized
+            block_copy["labor"] = labor_copy
+        else:
+            normalized = normalize_assigned_mechanics(block_copy.get("assigned_mechanics"), mechanics_by_id)
+            block_copy["assigned_mechanics"] = normalized
+
+        out.append(block_copy)
+
+    return out
+
+
 def get_pricing_rules_json(shop_db, shop_id: ObjectId):
     doc = shop_db.parts_pricing_rules.find_one({"shop_id": shop_id, "is_active": True})
     if not doc:
@@ -402,6 +552,7 @@ def get_shop_supply_percentage(shop_db, shop_id: ObjectId) -> float:
 
 def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
     customers = get_customers(shop_db)
+    mechanics = get_assignable_mechanics(shop)
 
     units = []
     if customer_id:
@@ -416,6 +567,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "selected_customer_id": str(customer_id) if customer_id else "",
         "selected_unit_id": str(unit_id) if unit_id else "",
         "labor_rates": get_labor_rates(shop_db, shop["_id"]),
+        "mechanics": mechanics,
         "parts_pricing_rules": get_pricing_rules_json(shop_db, shop["_id"]),
         "shop_supply_procentage": get_shop_supply_percentage(shop_db, shop["_id"]),
 
@@ -582,7 +734,7 @@ def preview_work_order():
     labors_map: dict[int, dict] = {}
 
     # labor
-    labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code)\]$")
+    labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code|assigned_mechanics_json)\]$")
     # parts
     parts_re = re.compile(
         r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price|core_charge|misc_charge|misc_charge_description)\]$"
@@ -601,6 +753,8 @@ def preview_work_order():
                 b["labor"]["hours"] = (val or "").strip()
             elif field == "labor_rate_code":
                 b["labor"]["rate_code"] = (val or "").strip()
+            elif field == "assigned_mechanics_json":
+                b["labor"]["assigned_mechanics_json"] = (val or "").strip()
             continue
 
         m = parts_re.match(key)
@@ -630,6 +784,7 @@ def preview_work_order():
             continue
 
     # normalize labors list in order
+    mechanics_by_id = {m["id"]: m for m in get_assignable_mechanics(shop)}
     labors = []
     for bidx in sorted(labors_map.keys()):
         b = labors_map[bidx]
@@ -659,11 +814,21 @@ def preview_work_order():
             })
 
         labor = b.get("labor") or {}
+        assigned_mechanics = []
+        assigned_raw = (labor.get("assigned_mechanics_json") or "").strip()
+        if assigned_raw:
+            try:
+                assigned_data = json.loads(assigned_raw)
+            except Exception:
+                assigned_data = []
+            assigned_mechanics = normalize_assigned_mechanics(assigned_data, mechanics_by_id)
+
         labors.append({
             "labor": {
                 "description": (labor.get("description") or "").strip(),
                 "hours": (labor.get("hours") or "").strip(),
                 "rate_code": (labor.get("rate_code") or "").strip(),
+                "assigned_mechanics": assigned_mechanics,
             },
             "parts": parts_clean,
         })
@@ -964,6 +1129,9 @@ def api_work_order_update(work_order_id):
 
     if not isinstance(labors, list):
         return jsonify({"ok": False, "error": "labors_required"}), 200
+
+    mechanics_by_id = {m["id"]: m for m in get_assignable_mechanics(shop)}
+    labors = apply_assignments_to_labors(labors, mechanics_by_id)
 
     # (опционально) можно запретить редактирование, если paid
     if (wo.get("status") or "open") == "paid":
