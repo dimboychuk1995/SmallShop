@@ -239,6 +239,7 @@
                         <th>Description</th>
                         <th style="width:10%;">Count</th>
                         <th style="width:14%;">Cost</th>
+                        <th style="width:10%;">Core</th>
                         <th style="width:14%;">Price</th>
                         <th style="width:14%;">Line Total</th>
                       </tr>
@@ -257,6 +258,9 @@
                         <td>
                           <input class="form-control form-control-sm part-cost" name="labors[0][parts][0][cost]" inputmode="decimal" readonly tabindex="-1">
                           <div class="small text-muted mt-1 part-charges-meta"></div>
+                        </td>
+                        <td>
+                          <input class="form-control form-control-sm part-core-display" value="" readonly tabindex="-1">
                         </td>
                         <td><input class="form-control form-control-sm part-price" name="labors[0][parts][0][price]" value="" inputmode="decimal"></td>
                         <td class="part-line-total"><span class="text-muted">—</span></td>

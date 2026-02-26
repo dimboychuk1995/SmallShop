@@ -847,27 +847,26 @@ def create_work_order():
     now = utcnow()
     user_id = current_user_id()
 
-    if action == "create":
-        doc = {
-            "shop_id": shop["_id"],
-            "tenant_id": shop.get("tenant_id"),
-            "customer_id": customer_id,
-            "unit_id": unit_id,
-            "status": "open",
-            "labors": labors,
+    doc = {
+        "shop_id": shop["_id"],
+        "tenant_id": shop.get("tenant_id"),
+        "customer_id": customer_id,
+        "unit_id": unit_id,
+        "status": "open",
+        "labors": labors,
 
-            # ✅ store totals from UI
-            "totals": totals,
-            "labor_total": totals.get("labor_total", 0.0),
-            "parts_total": totals.get("parts_total", 0.0),
-            "grand_total": totals.get("grand_total", 0.0),
+        # ✅ store totals from UI
+        "totals": totals,
+        "labor_total": totals.get("labor_total", 0.0),
+        "parts_total": totals.get("parts_total", 0.0),
+        "grand_total": totals.get("grand_total", 0.0),
 
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-            "created_by": user_id,
-            "updated_by": user_id,
-        }
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user_id,
+        "updated_by": user_id,
+    }
 
     res = shop_db.work_orders.insert_one(doc)
     flash("Work order created.", "success")
