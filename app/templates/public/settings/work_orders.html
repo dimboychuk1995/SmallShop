@@ -15,23 +15,47 @@
 
 <div class="card">
   <div class="card-body">
-    <h2 class="h6 mb-3">Shop Supply Amount</h2>
-    <form method="post" action="{{ url_for('settings.work_orders_index') }}" class="row g-3 align-items-end">
-      <div class="col-md-4">
-        <label class="form-label">Shop supply percentage</label>
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          name="shop_supply_procentage"
-          class="form-control"
-          value="{{ shop_supply_procentage if shop_supply_procentage is not none else 5 }}"
-          required
-        />
+    <form method="post" action="{{ url_for('settings.work_orders_index') }}" class="row g-4">
+      <div class="col-12">
+        <h2 class="h6 mb-3">Shop Supply Amount</h2>
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Shop supply percentage</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              name="shop_supply_procentage"
+              class="form-control"
+              value="{{ shop_supply_procentage if shop_supply_procentage is not none else 5 }}"
+              required
+            />
+          </div>
+          <div class="col-md-8">
+            <div class="text-muted small">Used to calculate shop supply amount for work orders.</div>
+          </div>
+        </div>
       </div>
-      <div class="col-md-8">
-        <div class="text-muted small">Used to calculate shop supply amount for work orders.</div>
+
+      <div class="col-12">
+        <h2 class="h6 mb-3">Core Charge Rules</h2>
+        <div class="form-check form-switch">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            role="switch"
+            value="1"
+            id="chargeForCoresDefault"
+            name="charge_for_cores_default"
+            {% if core_charge_default %}checked{% endif %}
+          >
+          <label class="form-check-label" for="chargeForCoresDefault">
+            Charge core by default
+          </label>
+        </div>
+        <div class="text-muted small mt-1">If enabled, core charge is applied by default in work orders.</div>
       </div>
+
       <div class="col-12">
         <button type="submit" class="btn btn-primary">Save</button>
       </div>

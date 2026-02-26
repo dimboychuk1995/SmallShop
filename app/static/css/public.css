@@ -11,7 +11,7 @@ fieldset {
   padding: 12px;
 }
 
-input, select, button {
+input:not([type="checkbox"]):not([type="radio"]), select, button {
   margin: 6px 0 12px 0;
   padding: 6px;
   min-width: 260px;

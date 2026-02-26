@@ -94,9 +94,12 @@ def work_orders_index():
 
     rules_col = sdb.shop_supply_amount_rules
     existing = rules_col.find_one({"shop_id": shop_oid})
+    core_rules_col = sdb.core_charge_rules
+    core_existing = core_rules_col.find_one({"shop_id": shop_oid})
 
     if request.method == "POST":
         raw = (request.form.get("shop_supply_procentage") or "").strip()
+        charge_for_cores_default = bool(request.form.get("charge_for_cores_default"))
         try:
             value = float(raw)
         except Exception:
@@ -119,7 +122,25 @@ def work_orders_index():
             },
             upsert=True,
         )
-        flash("Shop supply amount updated.", "success")
+
+        core_rules_col.update_one(
+            {"shop_id": shop_oid},
+            {
+                "$set": {
+                    "charge_for_cores_default": charge_for_cores_default,
+                    "updated_at": now,
+                    "updated_by": user.get("_id"),
+                },
+                "$setOnInsert": {
+                    "shop_id": shop_oid,
+                    "created_at": now,
+                    "created_by": user.get("_id"),
+                },
+            },
+            upsert=True,
+        )
+
+        flash("Work order settings updated.", "success")
         return redirect(url_for("settings.work_orders_index"))
 
     if existing is None:
@@ -137,9 +158,31 @@ def work_orders_index():
         )
         existing = rules_col.find_one({"shop_id": shop_oid})
 
+    if core_existing is None:
+        now = datetime.now(timezone.utc)
+        core_rules_col.update_one(
+            {"shop_id": shop_oid},
+            {
+                "$setOnInsert": {
+                    "shop_id": shop_oid,
+                    "charge_for_cores_default": False,
+                    "created_at": now,
+                    "created_by": user.get("_id"),
+                },
+                "$set": {
+                    "updated_at": now,
+                    "updated_by": user.get("_id"),
+                },
+            },
+            upsert=True,
+        )
+        core_existing = core_rules_col.find_one({"shop_id": shop_oid})
+
     supply_value = existing.get("shop_supply_procentage") if isinstance(existing, dict) else 5
+    core_charge_default = bool(core_existing.get("charge_for_cores_default")) if isinstance(core_existing, dict) else False
 
     return _render_settings_page(
         "public/settings/work_orders.html",
         shop_supply_procentage=supply_value,
+        core_charge_default=core_charge_default,
     )
