@@ -121,24 +121,23 @@
     <script type="application/json" id="mechanicsData">{{ mechanics|tojson }}</script>
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
     <script type="application/json" id="shopSupplyData">{{ {"percentage": shop_supply_procentage}|tojson }}</script>
-    <script type="application/json" id="workOrderDraftData">{{ (draft_labors or draft_blocks or [])|tojson }}</script>
-    <script type="application/json" id="workOrderTotalsData">{{ (draft_totals or {})|tojson }}</script>
+    <script type="application/json" id="workOrderInitialData">{{ (initial_labors or [])|tojson }}</script>
+    <script type="application/json" id="workOrderInitialTotalsData">{{ (initial_totals or {})|tojson }}</script>
     <script type="application/json" id="workOrderCreatedData">{{ {"created": work_order_created, "id": created_work_order_id, "status": work_order_status}|tojson }}</script>
 
 
 
     <!-- Work Order editor -->
-    <form id="workOrderForm" method="post" action="{{ url_for('work_orders.preview_work_order') }}" class="mt-3">
+    <form id="workOrderForm" method="post" action="{{ url_for('work_orders.create_work_order') }}" class="mt-3">
 
 
       <!-- hidden ids that JS updates (important) -->
       <input type="hidden" id="selectedCustomerHidden" name="customer_id" value="{{ selected_customer_id or '' }}"/>
       <input type="hidden" id="selectedUnitHidden" name="unit_id" value="{{ selected_unit_id or '' }}"/>
-      <input type="hidden" name="action" id="actionHidden" value="recalc">
 
       <!-- info -->
       <div id="selectHint" class="alert alert-info mb-3" {% if selected_unit_id %}style="display:none;"{% endif %}>
-        Select a customer and unit to continue. Your draft labors will stay on the page when you switch customer/unit.
+        Select a customer and unit to continue.
       </div>
 
       <fieldset id="workOrderEditor" {% if not selected_unit_id %}disabled{% endif %}>

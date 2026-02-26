@@ -1244,7 +1244,7 @@
     return Array.isArray(data.items) ? data.items : [];
   }
 
-  // ---------------- restore draft ----------------
+  // ---------------- restore initial data ----------------
   function ensureBlocksCount(blocksContainer, desiredCount) {
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     while (blocks.length < desiredCount) {
@@ -1254,13 +1254,13 @@
     Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
   }
 
-  function applyDraftToUi(blocksContainer, draftBlocks) {
-    if (!Array.isArray(draftBlocks) || draftBlocks.length === 0) return;
+  function applyInitialDataToUi(blocksContainer, initialBlocks) {
+    if (!Array.isArray(initialBlocks) || initialBlocks.length === 0) return;
 
-    ensureBlocksCount(blocksContainer, draftBlocks.length);
+    ensureBlocksCount(blocksContainer, initialBlocks.length);
     const blockEls = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
 
-    draftBlocks.forEach((b, bIdx) => {
+    initialBlocks.forEach((b, bIdx) => {
       const el = blockEls[bIdx];
       if (!el) return;
 
@@ -1590,7 +1590,7 @@
     const mechanicsData = readJsonScript("mechanicsData", []);
     const pricing = readJsonScript("partsPricingRulesData", null);
     const shopSupplyData = readJsonScript("shopSupplyData", { percentage: 0 });
-    const totalsSnapshot = readJsonScript("workOrderTotalsData", {});
+    const totalsSnapshot = readJsonScript("workOrderInitialTotalsData", {});
 
     const shopSupplyPct = toNum(shopSupplyData?.percentage ?? shopSupplyData) || 0;
 
@@ -1607,7 +1607,6 @@
     const createUnitCustomerHidden = $("createUnitCustomerHidden");
 
     const woForm = $("workOrderForm");
-    const actionHidden = $("actionHidden");
 
     const createBtn = $("createWorkOrderBtn");
     const editBtn = $("editWorkOrderBtn");
@@ -1832,31 +1831,28 @@
       if (hint) hint.style.display = enabled ? "none" : "";
     }
 
-    function submitWithAction(action) {
+    function submitCreate() {
       if (!woForm) return;
-      if (actionHidden) actionHidden.value = action;
 
-      // ✅ перед отправкой формы на create/recalc кладём totals_json
+      // ✅ перед отправкой формы на create кладём totals_json
       const totals = serializeTotals(blocksContainer);
       upsertHiddenJsonInput(woForm, "totals_json", totals);
 
       if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
       else woForm.submit();
 
-      if (action === "create") {
-        setButtonsState("creating", els);
-      }
+      setButtonsState("creating", els);
     }
 
     // create still uses normal form POST
-    createBtn?.addEventListener("click", () => submitWithAction("create"));
+    createBtn?.addEventListener("click", submitCreate);
 
     unitVinInput?.addEventListener("input", debouncedVinLookup);
     unitVinInput?.addEventListener("blur", debouncedVinLookup);
 
-    // ---------- restore draft FIRST ----------
-    const draftBlocks = readJsonScript("workOrderDraftData", []);
-    applyDraftToUi(blocksContainer, draftBlocks);
+    // ---------- restore initial saved data FIRST ----------
+    const initialBlocks = readJsonScript("workOrderInitialData", []);
+    applyInitialDataToUi(blocksContainer, initialBlocks);
 
     // wire + totals
     wireBlockEvents(blocksContainer, pricing, laborRates, shopSupplyPct);

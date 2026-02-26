@@ -580,8 +580,8 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "work_order_created": bool((form_state or {}).get("work_order_created")),
         "created_work_order_id": (form_state or {}).get("created_work_order_id") or "",
 
-        "draft_labors": (form_state or {}).get("draft_labors") or (form_state or {}).get("draft_blocks") or [],
-        "draft_totals": normalize_totals_payload((form_state or {}).get("draft_totals") or {}),
+        "initial_labors": (form_state or {}).get("initial_labors") or [],
+        "initial_totals": normalize_totals_payload((form_state or {}).get("initial_totals") or {}),
         "work_order_status": (form_state or {}).get("work_order_status") or "open",
     }
 
@@ -640,8 +640,8 @@ def work_order_details_page():
             form_state={
                 "work_order_created": True,
                 "created_work_order_id": str(wo.get("_id")),
-                "draft_labors": normalize_saved_labors(wo.get("labors") or wo.get("blocks") or []),
-                "draft_totals": wo.get("totals")
+                "initial_labors": normalize_saved_labors(wo.get("labors") or wo.get("blocks") or []),
+                "initial_totals": wo.get("totals")
                 or {
                     "labor_total": wo.get("labor_total") or 0,
                     "parts_total": wo.get("parts_total") or 0,
@@ -702,16 +702,14 @@ def create_unit():
     return redirect(url_for("work_orders.work_order_details_page", customer_id=str(customer_id), unit_id=str(unit_id)))
 
 
-@work_orders_bp.post("/work_orders/preview")
+@work_orders_bp.post("/work_orders/create")
 @login_required
 @permission_required("work_orders.create")
-def preview_work_order():
+def create_work_order():
     shop_db, shop = get_shop_db()
     if shop_db is None:
         flash("Shop database not configured.", "error")
         return redirect(url_for("main.dashboard"))
-
-    action = (request.form.get("action") or "recalc").strip().lower()
 
     customer_id = oid(request.form.get("customer_id"))
     unit_id = oid(request.form.get("unit_id"))
@@ -871,25 +869,10 @@ def preview_work_order():
             "updated_by": user_id,
         }
 
-        res = shop_db.work_orders.insert_one(doc)
-        flash("Work order created.", "success")
+    res = shop_db.work_orders.insert_one(doc)
+    flash("Work order created.", "success")
 
-        return render_details(
-            shop_db,
-            shop,
-            customer_id,
-            unit_id,
-            form_state={
-                "work_order_created": True,
-                "created_work_order_id": str(res.inserted_id),
-                "draft_labors": labors,
-                "draft_totals": totals,
-                "work_order_status": "open",
-            },
-        )
-
-    # recalc/preview: just re-render (for now)
-    return render_details(shop_db, shop, customer_id, unit_id)
+    return redirect(url_for("work_orders.work_order_details_page", work_order_id=str(res.inserted_id)))
 
 
 # -----------------------------
