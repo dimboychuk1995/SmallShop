@@ -1884,19 +1884,27 @@
       if (dd.style.display !== "none") hideDropdown(dd);
     }, { passive: true });
 
-    // bind search on inputs (part-number / part-description)
-    blocksContainer.addEventListener("focusin", function (e) {
-      const target = e.target;
+    function triggerPartsSearch(target) {
       if (!(target instanceof HTMLInputElement)) return;
-
       if (!(target.classList.contains("part-number") || target.classList.contains("part-description"))) return;
 
       const tr = target.closest("tr.parts-row");
       const blockEl = target.closest(".wo-labor");
       if (!tr || !blockEl) return;
-      target.addEventListener("focus", () => debouncedSearch(dd, target, tr, blockEl));
+
       debouncedSearch(dd, target, tr, blockEl);
+    }
+
+    // bind search on inputs (part-number / part-description)
+    blocksContainer.addEventListener("focusin", function (e) {
+      const target = e.target;
+      triggerPartsSearch(target);
     }, { passive: true });
+
+    blocksContainer.addEventListener("input", function (e) {
+      const target = e.target;
+      triggerPartsSearch(target);
+    });
 
     addLaborBtn?.addEventListener("click", function () {
       const cloned = cloneBlock(blocksContainer);
