@@ -258,6 +258,41 @@ def seed_shop_supply_amount_rules(shop_db, shop_id: ObjectId):
     )
 
 
+def seed_core_charge_rules(shop_db, shop_id: ObjectId, created_by=None, updated_by=None):
+    """
+    Ensure default core charge rules exist in shop DB (idempotent).
+    Collection: core_charge_rules
+    """
+    if shop_db is None or shop_id is None:
+        return
+
+    col = shop_db.core_charge_rules
+
+    try:
+        col.create_index([("shop_id", 1)], unique=True, name="uniq_core_charge_rules_shop")
+    except Exception:
+        pass
+
+    now = utcnow()
+
+    col.update_one(
+        {"shop_id": shop_id},
+        {
+            "$setOnInsert": {
+                "shop_id": shop_id,
+                "charge_for_cores_default": False,
+                "created_at": now,
+                "created_by": created_by,
+            },
+            "$set": {
+                "updated_at": now,
+                "updated_by": updated_by,
+            },
+        },
+        upsert=True,
+    )
+
+
 def ensure_shop_collections_indexes(shop_db):
     """
     Create indexes for shop-scoped collections used by UI/API queries.
@@ -301,7 +336,7 @@ def ensure_shop_collections_indexes(shop_db):
     shop_db.labor_rates.create_index([("shop_id", 1), ("is_active", 1), ("name", 1)], name="idx_labor_rates_shop_active_name")
 
 
-def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
+def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict, actor_user_id=None):
     """
     Creates shop DB and seeds minimal defaults:
     - settings (idempotent upsert)
@@ -431,6 +466,14 @@ def init_shop_database(shop_db_name: str, tenant_doc: dict, shop_doc: dict):
     except Exception:
         pass
 
+    # -----------------------------
+    # seed default core charge rules (NEW)
+    # -----------------------------
+    try:
+        seed_core_charge_rules(sdb, shop_oid, created_by=actor_user_id, updated_by=actor_user_id)
+    except Exception:
+        pass
+
 
 @tenant_bp.post("/register")
 def register_tenant():
@@ -529,14 +572,15 @@ def register_tenant():
             "created_at": created_at,
             "updated_at": created_at,
         }
-        master.users.insert_one(user_doc)
+        user_res = master.users.insert_one(user_doc)
+        owner_user_id = user_res.inserted_id
 
         # Create tenant DB
         init_tenant_database(tenant_db_name, tenant_doc)
         created_tenant_db = True
 
         # Create shop DB (will seed parts_categories + pricing rules + labor rates)
-        init_shop_database(shop_db_name, tenant_doc, shop_doc)
+        init_shop_database(shop_db_name, tenant_doc, shop_doc, actor_user_id=owner_user_id)
         created_shop_db = True
 
         return jsonify({
