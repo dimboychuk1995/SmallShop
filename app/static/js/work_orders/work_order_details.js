@@ -444,7 +444,7 @@
       };
     }
 
-    let total = 0;
+    let partsBaseTotal = 0;
     let coreTotal = 0;
     let miscTotal = 0;
     const miscBreakdownMap = new Map();
@@ -455,10 +455,14 @@
         clearRowCalc(tr);
         continue;
       }
-      const lt = calcRowLineTotal(tr, pricing);
-      if (lt !== null && Number.isFinite(lt)) total += lt;
-
       const qty = toNum(tr.querySelector(".part-qty")?.value);
+      calcRowLineTotal(tr, pricing);
+
+      const rowPrice = toNum(tr.querySelector(".part-price")?.value);
+      if (qty !== null && qty > 0 && Number.isFinite(rowPrice) && rowPrice >= 0) {
+        partsBaseTotal += round2(rowPrice * qty);
+      }
+
       const { coreCharge, miscCharge } = getRowCharges(tr);
       const miscItems = getRowMiscItems(tr);
       if (qty !== null && qty > 0) {
@@ -479,9 +483,9 @@
             count: 0,
             amount: 0,
           };
-          // If manual charge, use its quantity directly
-          // If automatic charge (from part data), multiply by part qty
-          const effectiveQty = item.manual === true ? itemQuantity : (itemQuantity * qty);
+          // Manual misc charge uses its own quantity from the misc table.
+          // Automatic misc charge is per-part and should be multiplied only by part qty.
+          const effectiveQty = item.manual === true ? itemQuantity : qty;
           prev.count = round2(prev.count + effectiveQty);
           prev.amount = round2(prev.amount + (unitPrice * effectiveQty));
           miscBreakdownMap.set(key, prev);
@@ -524,7 +528,7 @@
       }
     }
 
-    total = round2(total);
+    partsBaseTotal = round2(partsBaseTotal);
     coreTotal = round2(coreTotal);
     
     // Calculate misc total from breakdown (includes both automatic and manual charges)
@@ -536,7 +540,7 @@
     }
     miscTotal = round2(miscTotalFromBreakdown);
     return {
-      partsTotal: total > 0 ? total : null,
+      partsTotal: partsBaseTotal > 0 ? partsBaseTotal : null,
       coreTotal,
       miscTotal,
       miscBreakdown: Array.from(miscBreakdownMap.values())
@@ -571,21 +575,22 @@
     if (partsEl) partsEl.textContent = Number.isFinite(partsTotal) ? `$${money(partsTotal)}` : "—";
     const hasCore = Number.isFinite(coreTotal) && coreTotal > 0;
     const hasMisc = Number.isFinite(miscTotal) && miscTotal > 0;
-    const hasSupply = Number.isFinite(shopSupplyTotal) && shopSupplyTotal > 0;
     if (coreWrap) coreWrap.style.display = hasCore ? "" : "none";
     if (miscWrap) miscWrap.style.display = hasMisc ? "" : "none";
-    if (supplyWrap) supplyWrap.style.display = hasSupply ? "" : "none";
+    if (supplyWrap) supplyWrap.style.display = "none";
     if (coreEl) coreEl.textContent = hasCore ? `$${money(coreTotal)}` : "—";
     if (miscEl) miscEl.textContent = hasMisc ? `$${money(miscTotal)}` : "—";
-    if (supplyEl) supplyEl.textContent = hasSupply ? `$${money(shopSupplyTotal)}` : "—";
+    if (supplyEl) supplyEl.textContent = "—";
 
-    const sum =
+    const laborBlockTotal =
       (Number.isFinite(laborTotal) ? laborTotal : 0)
       + (Number.isFinite(partsTotal) ? partsTotal : 0)
+      + (Number.isFinite(coreTotal) ? coreTotal : 0)
       + (Number.isFinite(miscTotal) ? miscTotal : 0);
-    const sumWithSupply = sum + (Number.isFinite(shopSupplyTotal) ? shopSupplyTotal : 0);
     if (blockElTotal) {
-      blockElTotal.textContent = (Number.isFinite(laborTotal) || Number.isFinite(partsTotal)) ? `$${money(round2(sumWithSupply))}` : "—";
+      blockElTotal.textContent = (Number.isFinite(laborTotal) || Number.isFinite(partsTotal) || Number.isFinite(coreTotal) || Number.isFinite(miscTotal))
+        ? `$${money(round2(laborBlockTotal))}`
+        : "—";
     }
   }
 
@@ -597,10 +602,7 @@
     const coreTotal = partsTotals.coreTotal;
     const miscTotal = partsTotals.miscTotal;
     const miscBreakdown = partsTotals.miscBreakdown;
-    const supplyBase = Number.isFinite(laborTotal) ? laborTotal : 0;
-    const supplyTotal = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
-      ? round2(supplyBase * (shopSupplyPct / 100))
-      : 0;
+    const supplyTotal = 0;
     setBlockTotalsUI(blockEl, laborTotal, partsTotal, coreTotal, miscTotal, supplyTotal, miscBreakdown);
     const labor = Number.isFinite(laborTotal) ? laborTotal : 0;
     const parts = Number.isFinite(partsTotal) ? partsTotal : 0;
@@ -613,7 +615,7 @@
       core,
       misc,
       supply,
-      total: round2(labor + parts + misc + supply),
+      total: round2(labor + parts + core + misc),
     };
   }
 
@@ -631,21 +633,30 @@
       partsGrand += totals.parts;
       coreGrand += totals.core;
       miscGrand += totals.misc;
-      supplyGrand += totals.supply;
       grand += totals.total;
     }
     laborGrand = round2(laborGrand);
     partsGrand = round2(partsGrand);
     coreGrand = round2(coreGrand);
     miscGrand = round2(miscGrand);
+    supplyGrand = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
+      ? round2(laborGrand * (shopSupplyPct / 100))
+      : 0;
+    const partsGrandTotal = round2(partsGrand + coreGrand + miscGrand);
+    const laborGrandTotal = round2(laborGrand + supplyGrand);
+    grand = round2(grand + supplyGrand);
     supplyGrand = round2(supplyGrand);
     grand = round2(grand);
 
     const laborGrandEl = $("laborGrandTotalDisplay");
-    if (laborGrandEl) laborGrandEl.textContent = blocks.length ? `$${money(laborGrand)}` : "—";
+    if (laborGrandEl) laborGrandEl.textContent = blocks.length ? `$${money(laborGrandTotal)}` : "—";
+    const laborGrandBaseEl = $("laborGrandBaseDisplay");
+    if (laborGrandBaseEl) laborGrandBaseEl.textContent = blocks.length ? `$${money(laborGrand)}` : "—";
 
     const partsGrandEl = $("partsGrandTotalDisplay");
-    if (partsGrandEl) partsGrandEl.textContent = blocks.length ? `$${money(partsGrand)}` : "—";
+    if (partsGrandEl) partsGrandEl.textContent = blocks.length ? `$${money(partsGrandTotal)}` : "—";
+    const partsGrandBaseEl = $("partsGrandBaseDisplay");
+    if (partsGrandBaseEl) partsGrandBaseEl.textContent = blocks.length ? `$${money(partsGrand)}` : "—";
 
     const coreGrandWrap = $("coreGrandTotalWrap");
     const coreGrandEl = $("coreGrandTotalDisplay");
@@ -696,13 +707,12 @@
       const blockText = bEl.querySelector(".laborFullTotalDisplay")?.textContent || "0";
       const coreText = bEl.querySelector(".coreTotalDisplay")?.textContent || "0";
       const miscText = bEl.querySelector(".miscTotalDisplay")?.textContent || "0";
-      const supplyText = bEl.querySelector(".shopSupplyTotalDisplay")?.textContent || "0";
 
       const laborTotal = round2(parseMoneyText(laborText));
       const partsTotal = round2(parseMoneyText(partsText));
       const coreTotal = round2(parseMoneyText(coreText));
       const miscTotal = round2(parseMoneyText(miscText));
-      const supplyTotal = round2(parseMoneyText(supplyText));
+      const supplyTotal = 0;
       const blockTotal = round2(parseMoneyText(blockText));
 
       laborSum += laborTotal;
@@ -722,10 +732,13 @@
       });
     });
 
+    const supplyGrandText = $("shopSupplyGrandTotalDisplay")?.textContent || "0";
+    supplySum = round2(parseMoneyText(supplyGrandText));
+
     // grand_total берём из UI, но если там "—" / пусто — пересчитаем из блоков
     const grandText = $("grandTotalDisplay")?.textContent || "";
     const grandUi = round2(parseMoneyText(grandText));
-    const grandFinal = grandUi > 0 ? grandUi : round2(grandSum);
+    const grandFinal = grandUi > 0 ? grandUi : round2(grandSum + supplySum);
 
     return {
       labor_total: round2(laborSum),
@@ -751,17 +764,13 @@
       const core = toNum(bt.core_total);
       const misc = toNum(bt.misc_total);
       if (labor === null && parts === null && core === null && misc === null) return;
-      const supplyBase = Number.isFinite(labor) ? labor : 0;
-      const supplyTotal = (Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
-        ? round2(supplyBase * (shopSupplyPct / 100))
-        : 0;
       setBlockTotalsUI(
         bEl,
         Number.isFinite(labor) ? round2(labor) : null,
         Number.isFinite(parts) ? round2(parts) : null,
         Number.isFinite(core) ? round2(core) : 0,
         Number.isFinite(misc) ? round2(misc) : 0,
-        supplyTotal,
+        0,
         [],
       );
     });
@@ -775,15 +784,23 @@
     const supplyGrand = (Number.isFinite(laborGrand) && Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
       ? round2(laborGrand * (shopSupplyPct / 100))
       : (Number.isFinite(supplyGrandStored) ? round2(supplyGrandStored) : 0);
-    const calculatedGrand = (Number.isFinite(laborGrand) && Number.isFinite(partsGrand) && Number.isFinite(miscGrand))
-      ? round2(laborGrand + partsGrand + miscGrand + supplyGrand)
+    const laborGrandTotal = Number.isFinite(laborGrand) ? round2(laborGrand + supplyGrand) : null;
+    const partsGrandTotal = (Number.isFinite(partsGrand) || Number.isFinite(coreGrand) || Number.isFinite(miscGrand))
+      ? round2((Number.isFinite(partsGrand) ? partsGrand : 0) + (Number.isFinite(coreGrand) ? coreGrand : 0) + (Number.isFinite(miscGrand) ? miscGrand : 0))
+      : null;
+    const calculatedGrand = (Number.isFinite(laborGrand) && Number.isFinite(partsGrandTotal))
+      ? round2(laborGrand + supplyGrand + partsGrandTotal)
       : null;
 
     const laborGrandEl = $("laborGrandTotalDisplay");
-    if (laborGrandEl && Number.isFinite(laborGrand)) laborGrandEl.textContent = `$${money(round2(laborGrand))}`;
+    if (laborGrandEl && Number.isFinite(laborGrandTotal)) laborGrandEl.textContent = `$${money(round2(laborGrandTotal))}`;
+    const laborGrandBaseEl = $("laborGrandBaseDisplay");
+    if (laborGrandBaseEl && Number.isFinite(laborGrand)) laborGrandBaseEl.textContent = `$${money(round2(laborGrand))}`;
 
     const partsGrandEl = $("partsGrandTotalDisplay");
-    if (partsGrandEl && Number.isFinite(partsGrand)) partsGrandEl.textContent = `$${money(round2(partsGrand))}`;
+    if (partsGrandEl && Number.isFinite(partsGrandTotal)) partsGrandEl.textContent = `$${money(round2(partsGrandTotal))}`;
+    const partsGrandBaseEl = $("partsGrandBaseDisplay");
+    if (partsGrandBaseEl && Number.isFinite(partsGrand)) partsGrandBaseEl.textContent = `$${money(round2(partsGrand))}`;
 
     const coreGrandWrap = $("coreGrandTotalWrap");
     const coreGrandEl = $("coreGrandTotalDisplay");

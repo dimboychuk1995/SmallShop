@@ -143,13 +143,19 @@
 
       <fieldset id="workOrderEditor" {% if not selected_unit_id %}disabled{% endif %}>
 
-        <div class="d-flex flex-wrap gap-3 align-items-center mb-3 text-muted small">
-          <div>Labor total: <strong id="laborGrandTotalDisplay">—</strong></div>
-          <div>Parts total: <strong id="partsGrandTotalDisplay">—</strong></div>
-          <div id="coreGrandTotalWrap" style="display:none;">Core total: <strong id="coreGrandTotalDisplay">—</strong></div>
-          <div id="miscGrandTotalWrap" style="display:none;">Misc total: <strong id="miscGrandTotalDisplay">—</strong></div>
-          <div id="shopSupplyGrandTotalWrap" style="display:none;">Shop supply: <strong id="shopSupplyGrandTotalDisplay">—</strong></div>
-          <div>Grand total: <strong id="grandTotalDisplay">—</strong></div>
+        <div class="d-flex flex-wrap gap-2 align-items-stretch mb-3 text-muted small">
+          <div class="border rounded px-2 py-1">
+            <div>Labor total: <strong id="laborGrandTotalDisplay">—</strong></div>
+            <div>Labor: <strong id="laborGrandBaseDisplay">—</strong></div>
+            <div id="shopSupplyGrandTotalWrap" style="display:none;">Shop supply: <strong id="shopSupplyGrandTotalDisplay">—</strong></div>
+          </div>
+          <div class="border rounded px-2 py-1">
+            <div>Parts total: <strong id="partsGrandTotalDisplay">—</strong></div>
+            <div>Parts: <strong id="partsGrandBaseDisplay">—</strong></div>
+            <div id="coreGrandTotalWrap" style="display:none;">Cores: <strong id="coreGrandTotalDisplay">—</strong></div>
+            <div id="miscGrandTotalWrap" style="display:none;">Misc: <strong id="miscGrandTotalDisplay">—</strong></div>
+          </div>
+          <div class="border rounded px-2 py-1 d-flex align-items-center">Grand total: <strong id="grandTotalDisplay" class="ms-1">—</strong></div>
         </div>
 
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -167,24 +173,20 @@
                 <div>
                   <h2 class="h6 mb-0">Labor <span class="labor-number">1</span></h2>
                   <div class="text-muted small mt-1 laborAssignSummary">Assigned: —</div>
-                  <div class="text-muted small mt-1">
-                    Labor: <strong class="laborTotalDisplay">—</strong>
-                    &nbsp;|&nbsp;
-                    Parts: <strong class="partsTotalDisplay">—</strong>
-                    <span class="coreTotalWrap" style="display:none;">
-                      &nbsp;|&nbsp;
-                      Core: <strong class="coreTotalDisplay">—</strong>
-                    </span>
-                    <span class="miscTotalWrap" style="display:none;">
-                      &nbsp;|&nbsp;
-                      Misc: <strong class="miscTotalDisplay">—</strong>
-                    </span>
-                    <span class="shopSupplyTotalWrap" style="display:none;">
-                      &nbsp;|&nbsp;
-                      Shop supply: <strong class="shopSupplyTotalDisplay">—</strong>
-                    </span>
-                    &nbsp;|&nbsp;
-                    Labor total: <strong class="laborFullTotalDisplay">—</strong>
+                  <div class="d-flex flex-wrap align-items-stretch gap-2 text-muted small mt-1">
+                    <div class="border rounded px-2 py-1">
+                      <div>Labor: <strong class="laborTotalDisplay">—</strong></div>
+                    </div>
+                    <div class="border rounded px-2 py-1">
+                      <div>Parts: <strong class="partsTotalDisplay">—</strong></div>
+                      <div class="coreTotalWrap" style="display:none;">
+                        Cores: <strong class="coreTotalDisplay">—</strong>
+                      </div>
+                      <div class="miscTotalWrap" style="display:none;">
+                        Misc: <strong class="miscTotalDisplay">—</strong>
+                      </div>
+                    </div>
+                    <div class="border rounded px-2 py-1 d-flex align-items-center">Labor total: <strong class="laborFullTotalDisplay ms-1">—</strong></div>
                   </div>
                 </div>
 
