@@ -694,8 +694,8 @@
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
     const outBlocks = [];
 
-    let laborSum = 0;
-    let partsSum = 0;
+    let laborBaseSum = 0;
+    let partsBaseSum = 0;
     let coreSum = 0;
     let miscSum = 0;
     let supplySum = 0;
@@ -708,25 +708,30 @@
       const coreText = bEl.querySelector(".coreTotalDisplay")?.textContent || "0";
       const miscText = bEl.querySelector(".miscTotalDisplay")?.textContent || "0";
 
-      const laborTotal = round2(parseMoneyText(laborText));
-      const partsTotal = round2(parseMoneyText(partsText));
+      const laborBase = round2(parseMoneyText(laborText));
+      const partsBase = round2(parseMoneyText(partsText));
       const coreTotal = round2(parseMoneyText(coreText));
       const miscTotal = round2(parseMoneyText(miscText));
       const supplyTotal = 0;
       const blockTotal = round2(parseMoneyText(blockText));
+      const laborTotal = round2(laborBase + supplyTotal);
+      const partsTotal = round2(partsBase + coreTotal + miscTotal);
 
-      laborSum += laborTotal;
-      partsSum += partsTotal;
+      laborBaseSum += laborBase;
+      partsBaseSum += partsBase;
       coreSum += coreTotal;
       miscSum += miscTotal;
       supplySum += supplyTotal;
       grandSum += blockTotal;
 
       outBlocks.push({
+        labor: laborBase,
         labor_total: laborTotal,
+        parts: partsBase,
         parts_total: partsTotal,
         core_total: coreTotal,
         misc_total: miscTotal,
+        cost_total: partsBase,
         shop_supply_total: supplyTotal,
         labor_full_total: blockTotal,
       });
@@ -740,11 +745,17 @@
     const grandUi = round2(parseMoneyText(grandText));
     const grandFinal = grandUi > 0 ? grandUi : round2(grandSum + supplySum);
 
+    const laborTotalSum = round2(laborBaseSum + supplySum);
+    const partsTotalSum = round2(partsBaseSum + coreSum + miscSum);
+
     return {
-      labor_total: round2(laborSum),
-      parts_total: round2(partsSum),
+      labor: round2(laborBaseSum),
+      labor_total: laborTotalSum,
+      parts: round2(partsBaseSum),
+      parts_total: partsTotalSum,
       core_total: round2(coreSum),
       misc_total: round2(miscSum),
+      cost_total: round2(partsBaseSum),
       shop_supply_total: round2(supplySum),
       grand_total: grandFinal,
       labors: outBlocks,
@@ -759,15 +770,28 @@
 
     blocks.forEach((bEl, idx) => {
       const bt = blockTotals[idx] || {};
-      const labor = toNum(bt.labor_total);
-      const parts = toNum(bt.parts_total);
+      const laborStored = toNum(bt.labor_total);
+      const partsStored = toNum(bt.parts_total);
+      const labor = toNum(bt.labor);
+      const parts = toNum(bt.parts);
       const core = toNum(bt.core_total);
       const misc = toNum(bt.misc_total);
-      if (labor === null && parts === null && core === null && misc === null) return;
+      const supply = toNum(bt.shop_supply_total);
+
+      const laborBase = Number.isFinite(labor)
+        ? labor
+        : (Number.isFinite(laborStored) ? round2(laborStored - (Number.isFinite(supply) ? supply : 0)) : null);
+      const partsBase = Number.isFinite(parts)
+        ? parts
+        : (Number.isFinite(partsStored)
+          ? round2(partsStored - (Number.isFinite(core) ? core : 0) - (Number.isFinite(misc) ? misc : 0))
+          : null);
+
+      if (laborBase === null && partsBase === null && core === null && misc === null) return;
       setBlockTotalsUI(
         bEl,
-        Number.isFinite(labor) ? round2(labor) : null,
-        Number.isFinite(parts) ? round2(parts) : null,
+        Number.isFinite(laborBase) ? round2(laborBase) : null,
+        Number.isFinite(partsBase) ? round2(partsBase) : null,
         Number.isFinite(core) ? round2(core) : 0,
         Number.isFinite(misc) ? round2(misc) : 0,
         0,
@@ -775,32 +799,47 @@
       );
     });
 
-    const laborGrand = toNum(totals.labor_total);
-    const partsGrand = toNum(totals.parts_total);
+    const laborGrandStored = toNum(totals.labor_total);
+    const partsGrandStored = toNum(totals.parts_total);
+    const laborGrandBaseStored = toNum(totals.labor);
+    const partsGrandBaseStored = toNum(totals.parts);
     const coreGrand = toNum(totals.core_total);
     const miscGrand = toNum(totals.misc_total);
     const grand = toNum(totals.grand_total);
     const supplyGrandStored = toNum(totals.shop_supply_total);
-    const supplyGrand = (Number.isFinite(laborGrand) && Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
-      ? round2(laborGrand * (shopSupplyPct / 100))
-      : (Number.isFinite(supplyGrandStored) ? round2(supplyGrandStored) : 0);
-    const laborGrandTotal = Number.isFinite(laborGrand) ? round2(laborGrand + supplyGrand) : null;
-    const partsGrandTotal = (Number.isFinite(partsGrand) || Number.isFinite(coreGrand) || Number.isFinite(miscGrand))
-      ? round2((Number.isFinite(partsGrand) ? partsGrand : 0) + (Number.isFinite(coreGrand) ? coreGrand : 0) + (Number.isFinite(miscGrand) ? miscGrand : 0))
+    const supplyGrand = Number.isFinite(supplyGrandStored)
+      ? round2(supplyGrandStored)
+      : ((Number.isFinite(laborGrandBaseStored) && Number.isFinite(shopSupplyPct) && shopSupplyPct > 0)
+        ? round2(laborGrandBaseStored * (shopSupplyPct / 100))
+        : 0);
+
+    const laborGrandBase = Number.isFinite(laborGrandBaseStored)
+      ? round2(laborGrandBaseStored)
+      : (Number.isFinite(laborGrandStored) ? round2(laborGrandStored - supplyGrand) : null);
+
+    const partsGrandBase = Number.isFinite(partsGrandBaseStored)
+      ? round2(partsGrandBaseStored)
+      : (Number.isFinite(partsGrandStored)
+        ? round2(partsGrandStored - (Number.isFinite(coreGrand) ? coreGrand : 0) - (Number.isFinite(miscGrand) ? miscGrand : 0))
+        : null);
+
+    const laborGrandTotal = Number.isFinite(laborGrandBase) ? round2(laborGrandBase + supplyGrand) : null;
+    const partsGrandTotal = (Number.isFinite(partsGrandBase) || Number.isFinite(coreGrand) || Number.isFinite(miscGrand))
+      ? round2((Number.isFinite(partsGrandBase) ? partsGrandBase : 0) + (Number.isFinite(coreGrand) ? coreGrand : 0) + (Number.isFinite(miscGrand) ? miscGrand : 0))
       : null;
-    const calculatedGrand = (Number.isFinite(laborGrand) && Number.isFinite(partsGrandTotal))
-      ? round2(laborGrand + supplyGrand + partsGrandTotal)
+    const calculatedGrand = (Number.isFinite(laborGrandTotal) && Number.isFinite(partsGrandTotal))
+      ? round2(laborGrandTotal + partsGrandTotal)
       : null;
 
     const laborGrandEl = $("laborGrandTotalDisplay");
     if (laborGrandEl && Number.isFinite(laborGrandTotal)) laborGrandEl.textContent = `$${money(round2(laborGrandTotal))}`;
     const laborGrandBaseEl = $("laborGrandBaseDisplay");
-    if (laborGrandBaseEl && Number.isFinite(laborGrand)) laborGrandBaseEl.textContent = `$${money(round2(laborGrand))}`;
+    if (laborGrandBaseEl && Number.isFinite(laborGrandBase)) laborGrandBaseEl.textContent = `$${money(round2(laborGrandBase))}`;
 
     const partsGrandEl = $("partsGrandTotalDisplay");
     if (partsGrandEl && Number.isFinite(partsGrandTotal)) partsGrandEl.textContent = `$${money(round2(partsGrandTotal))}`;
     const partsGrandBaseEl = $("partsGrandBaseDisplay");
-    if (partsGrandBaseEl && Number.isFinite(partsGrand)) partsGrandBaseEl.textContent = `$${money(round2(partsGrand))}`;
+    if (partsGrandBaseEl && Number.isFinite(partsGrandBase)) partsGrandBaseEl.textContent = `$${money(round2(partsGrandBase))}`;
 
     const coreGrandWrap = $("coreGrandTotalWrap");
     const coreGrandEl = $("coreGrandTotalDisplay");
@@ -1437,6 +1476,7 @@
       const labor_description = String(bEl.querySelector(".labor-description")?.value || "").trim();
       const labor_hours = String(bEl.querySelector(".labor-hours")?.value || "").trim();
       const labor_rate_code = String(bEl.querySelector(".labor-rate")?.value || "").trim();
+      const labor_full_total = round2(parseMoneyText(bEl.querySelector(".laborFullTotalDisplay")?.textContent || "0"));
       const assigned_mechanics = getLaborAssignments(bEl);
 
       const parts = [];
@@ -1467,6 +1507,7 @@
         labor_description,
         labor_hours: labor_hours === "" ? 0 : Number(labor_hours),
         labor_rate_code,
+        labor_full_total,
         assigned_mechanics,
         parts,
       });

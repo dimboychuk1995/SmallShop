@@ -54,6 +54,59 @@ def round2(v):
     return round(n + 1e-12, 2)
 
 
+def normalize_parts_payload(raw_parts):
+    if not isinstance(raw_parts, list):
+        return []
+
+    out = []
+    for p in raw_parts:
+        if not isinstance(p, dict):
+            continue
+
+        part_number = str(p.get("part_number") or "").strip()
+        description = str(p.get("description") or "").strip()
+        misc_charge_description = str(
+            p.get("misc_charge_description") if p.get("misc_charge_description") is not None else ""
+        ).strip()
+
+        qty_raw = i32(p.get("qty"))
+        cost_raw = f64(p.get("cost"))
+        price_raw = f64(p.get("price"))
+        core_raw = f64(
+            p.get("core_charge") if p.get("core_charge") is not None else p.get("core_cost")
+        )
+        misc_raw = f64(p.get("misc_charge"))
+
+        has_any = bool(part_number or description or misc_charge_description)
+        if qty_raw is not None:
+            has_any = True
+        if any((
+            cost_raw is not None,
+            price_raw is not None,
+            core_raw is not None,
+            misc_raw is not None,
+        )):
+            has_any = True
+
+        if not has_any:
+            continue
+
+        out.append(
+            {
+                "part_number": part_number,
+                "description": description,
+                "qty": int(qty_raw if qty_raw is not None else 0),
+                "cost": round2(cost_raw if cost_raw is not None else 0),
+                "price": round2(price_raw if price_raw is not None else 0),
+                "core_charge": round2(core_raw if core_raw is not None else 0),
+                "misc_charge": round2(misc_raw if misc_raw is not None else 0),
+                "misc_charge_description": misc_charge_description,
+            }
+        )
+
+    return out
+
+
 def normalize_totals_payload(raw):
     src = raw if isinstance(raw, dict) else {}
 
@@ -61,35 +114,55 @@ def normalize_totals_payload(raw):
     for b in (src.get("labors") or []):
         if not isinstance(b, dict):
             continue
-        labor_total = round2(b.get("labor_total"))
-        parts_total = round2(b.get("parts_total"))
+        labor = round2(b.get("labor") if b.get("labor") is not None else b.get("labor_total"))
+        parts = round2(b.get("parts") if b.get("parts") is not None else b.get("parts_total"))
         core_total = round2(b.get("core_total"))
         misc_total = round2(b.get("misc_total"))
         shop_supply_total = round2(b.get("shop_supply_total"))
-        labor_full_total = round2(b.get("labor_full_total"))
+        cost_total = round2(b.get("cost_total") if b.get("cost_total") is not None else parts)
+        labor_total = round2(labor + shop_supply_total)
+        parts_total = round2(parts + core_total + misc_total)
+        labor_full_total = round2(
+            b.get("labor_full_total")
+            if b.get("labor_full_total") is not None
+            else (labor + parts_total + shop_supply_total)
+        )
         blocks.append(
             {
+                "labor": labor,
                 "labor_total": labor_total,
+                "parts": parts,
                 "parts_total": parts_total,
                 "core_total": core_total,
                 "misc_total": misc_total,
+                "cost_total": cost_total,
                 "shop_supply_total": shop_supply_total,
                 "labor_full_total": labor_full_total,
             }
         )
 
-    labor_total = round2(src.get("labor_total"))
-    parts_total = round2(src.get("parts_total"))
+    labor = round2(src.get("labor") if src.get("labor") is not None else src.get("labor_total"))
+    parts = round2(src.get("parts") if src.get("parts") is not None else src.get("parts_total"))
     core_total = round2(src.get("core_total"))
     misc_total = round2(src.get("misc_total"))
     shop_supply_total = round2(src.get("shop_supply_total"))
-    grand_total = round2(src.get("grand_total"))
+    cost_total = round2(src.get("cost_total") if src.get("cost_total") is not None else parts)
+
+    labor_total = round2(labor + shop_supply_total)
+    parts_total = round2(parts + core_total + misc_total)
+    calculated_grand_total = round2(labor_total + parts_total)
+    grand_total = round2(
+        src.get("grand_total") if src.get("grand_total") is not None else calculated_grand_total
+    )
 
     return {
+        "labor": labor,
         "labor_total": labor_total,
+        "parts": parts,
         "parts_total": parts_total,
         "core_total": core_total,
         "misc_total": misc_total,
+        "cost_total": cost_total,
         "shop_supply_total": shop_supply_total,
         "grand_total": grand_total,
         "labors": blocks,
@@ -136,12 +209,12 @@ def normalize_saved_labors(raw):
         for item in (assigned_src or []):
             if not isinstance(item, dict):
                 continue
-            user_id = str(item.get("user_id") or item.get("id") or "").strip()
+            user_id = oid(item.get("user_id") or item.get("id"))
             if not user_id:
                 continue
             assigned_mechanics.append(
                 {
-                    "user_id": user_id,
+                    "user_id": str(user_id),
                     "name": str(item.get("name") or "").strip(),
                     "role": str(item.get("role") or "").strip(),
                     "percent": round2(item.get("percent")),
@@ -149,38 +222,19 @@ def normalize_saved_labors(raw):
             )
 
         parts_out = []
-        for p in (block.get("parts") or []):
-            if not isinstance(p, dict):
-                continue
-
-            part_number = str(p.get("part_number") or "").strip()
-            description = str(p.get("description") or "").strip()
-            qty = str(p.get("qty") if p.get("qty") is not None else "").strip()
-            cost = str(p.get("cost") if p.get("cost") is not None else "").strip()
-            price = str(p.get("price") if p.get("price") is not None else "").strip()
-            core_charge = str(
-                p.get("core_charge")
-                if p.get("core_charge") is not None
-                else (p.get("core_cost") if p.get("core_cost") is not None else "")
-            ).strip()
-            misc_charge = str(p.get("misc_charge") if p.get("misc_charge") is not None else "").strip()
-            misc_charge_description = str(
-                p.get("misc_charge_description") if p.get("misc_charge_description") is not None else ""
-            ).strip()
-
-            if not (part_number or description or qty or cost or price or core_charge or misc_charge or misc_charge_description):
-                continue
-
+        for p in normalize_parts_payload(block.get("parts") or []):
             parts_out.append(
                 {
-                    "part_number": part_number,
-                    "description": description,
-                    "qty": qty,
-                    "cost": cost,
-                    "price": price,
-                    "core_charge": core_charge,
-                    "misc_charge": misc_charge,
-                    "misc_charge_description": misc_charge_description,
+                    "part_number": str(p.get("part_number") or "").strip(),
+                    "description": str(p.get("description") or "").strip(),
+                    "qty": str(p.get("qty") if p.get("qty") is not None else ""),
+                    "cost": str(p.get("cost") if p.get("cost") is not None else ""),
+                    "price": str(p.get("price") if p.get("price") is not None else ""),
+                    "core_charge": str(p.get("core_charge") if p.get("core_charge") is not None else ""),
+                    "misc_charge": str(p.get("misc_charge") if p.get("misc_charge") is not None else ""),
+                    "misc_charge_description": str(
+                        p.get("misc_charge_description") if p.get("misc_charge_description") is not None else ""
+                    ),
                 }
             )
 
@@ -234,9 +288,9 @@ def get_work_orders_list(shop_db, shop_id: ObjectId, page: int, per_page: int):
     for x in rows:
         totals = x.get("totals") if isinstance(x.get("totals"), dict) else {}
 
-        labor_total = round2(x.get("labor_total") if x.get("labor_total") is not None else totals.get("labor_total"))
-        parts_total = round2(x.get("parts_total") if x.get("parts_total") is not None else totals.get("parts_total"))
-        grand_total = round2(x.get("grand_total") if x.get("grand_total") is not None else totals.get("grand_total"))
+        labor_total = round2(totals.get("labor_total") if totals.get("labor_total") is not None else x.get("labor_total"))
+        parts_total = round2(totals.get("parts_total") if totals.get("parts_total") is not None else x.get("parts_total"))
+        grand_total = round2(totals.get("grand_total") if totals.get("grand_total") is not None else x.get("grand_total"))
 
         status = (x.get("status") or "open").strip().lower()
 
@@ -446,9 +500,13 @@ def normalize_assigned_mechanics(raw, mechanics_by_id: dict[str, dict]):
         if percent < 0:
             percent = 0.0
 
+        user_oid = oid(user_id)
+        if not user_oid:
+            continue
+
         out.append(
             {
-                "user_id": user_id,
+                "user_id": user_oid,
                 "name": mechanic.get("name") or "",
                 "role": mechanic.get("role") or "",
                 "percent": percent,
@@ -475,12 +533,19 @@ def apply_assignments_to_labors(labors, mechanics_by_id: dict[str, dict]):
         labor_src = block_copy.get("labor") if isinstance(block_copy.get("labor"), dict) else None
         if labor_src is not None:
             labor_copy = dict(labor_src)
+            labor_copy["description"] = str(labor_copy.get("description") or "").strip()
+            labor_copy["hours"] = str(labor_copy.get("hours") or "").strip()
+            labor_copy["rate_code"] = str(labor_copy.get("rate_code") or "").strip()
+            labor_copy["labor_full_total"] = round2(labor_copy.get("labor_full_total"))
             normalized = normalize_assigned_mechanics(labor_copy.get("assigned_mechanics"), mechanics_by_id)
             labor_copy["assigned_mechanics"] = normalized
             block_copy["labor"] = labor_copy
         else:
             normalized = normalize_assigned_mechanics(block_copy.get("assigned_mechanics"), mechanics_by_id)
             block_copy["assigned_mechanics"] = normalized
+            block_copy["labor_full_total"] = round2(block_copy.get("labor_full_total"))
+
+        block_copy["parts"] = normalize_parts_payload(block_copy.get("parts") or [])
 
         out.append(block_copy)
 
@@ -651,8 +716,14 @@ def work_order_details_page():
                 "initial_labors": normalize_saved_labors(wo.get("labors") or wo.get("blocks") or []),
                 "initial_totals": wo.get("totals")
                 or {
+                    "labor": wo.get("labor_total") or 0,
                     "labor_total": wo.get("labor_total") or 0,
+                    "parts": wo.get("parts_total") or 0,
                     "parts_total": wo.get("parts_total") or 0,
+                    "core_total": 0,
+                    "misc_total": 0,
+                    "shop_supply_total": 0,
+                    "cost_total": wo.get("parts_total") or 0,
                     "grand_total": wo.get("grand_total") or 0,
                     "labors": [],
                 },
@@ -740,7 +811,7 @@ def create_work_order():
     labors_map: dict[int, dict] = {}
 
     # labor
-    labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code|assigned_mechanics_json)\]$")
+    labor_re = re.compile(r"^(?:labors|blocks)\[(\d+)\]\[(labor_description|labor_hours|labor_rate_code|labor_total_ui|labor_full_total|assigned_mechanics_json)\]$")
     # parts
     parts_re = re.compile(
         r"^(?:labors|blocks)\[(\d+)\]\[parts\]\[(\d+)\]\[(part_number|description|qty|cost|price|core_charge|misc_charge|misc_charge_description)\]$"
@@ -759,6 +830,8 @@ def create_work_order():
                 b["labor"]["hours"] = (val or "").strip()
             elif field == "labor_rate_code":
                 b["labor"]["rate_code"] = (val or "").strip()
+            elif field in ("labor_total_ui", "labor_full_total"):
+                b["labor"]["labor_full_total"] = round2(val)
             elif field == "assigned_mechanics_json":
                 b["labor"]["assigned_mechanics_json"] = (val or "").strip()
             continue
@@ -795,29 +868,7 @@ def create_work_order():
     for bidx in sorted(labors_map.keys()):
         b = labors_map[bidx]
 
-        # drop empty trailing part rows
-        parts_clean = []
-        for p in (b.get("parts") or []):
-            pn = (p.get("part_number") or "").strip()
-            ds = (p.get("description") or "").strip()
-            qty = (p.get("qty") or "").strip()
-            cost = (p.get("cost") or "").strip()
-            price = (p.get("price") or "").strip()
-            core_charge = (p.get("core_charge") or p.get("core_cost") or "").strip()
-            misc_charge = (p.get("misc_charge") or "").strip()
-            misc_charge_description = (p.get("misc_charge_description") or "").strip()
-            if not (pn or ds or qty or cost or price or core_charge or misc_charge or misc_charge_description):
-                continue
-            parts_clean.append({
-                "part_number": pn,
-                "description": ds,
-                "qty": qty,
-                "cost": cost,
-                "price": price,
-                "core_charge": core_charge,
-                "misc_charge": misc_charge,
-                "misc_charge_description": misc_charge_description,
-            })
+        parts_clean = normalize_parts_payload(b.get("parts") or [])
 
         labor = b.get("labor") or {}
         assigned_mechanics = []
@@ -834,6 +885,7 @@ def create_work_order():
                 "description": (labor.get("description") or "").strip(),
                 "hours": (labor.get("hours") or "").strip(),
                 "rate_code": (labor.get("rate_code") or "").strip(),
+                "labor_full_total": round2(labor.get("labor_full_total")),
                 "assigned_mechanics": assigned_mechanics,
             },
             "parts": parts_clean,
@@ -865,9 +917,6 @@ def create_work_order():
 
         # ✅ store totals from UI
         "totals": totals,
-        "labor_total": totals.get("labor_total", 0.0),
-        "parts_total": totals.get("parts_total", 0.0),
-        "grand_total": totals.get("grand_total", 0.0),
 
         "is_active": True,
         "created_at": now,
@@ -1136,14 +1185,14 @@ def api_work_order_update(work_order_id):
             "$set": {
                 "labors": labors,
                 "totals": totals,  # ✅ сохраняем totals от фронта
-                "labor_total": totals.get("labor_total", 0.0),
-                "parts_total": totals.get("parts_total", 0.0),
-                "grand_total": totals.get("grand_total", 0.0),
                 "updated_at": now,
                 "updated_by": user_id,
             },
             "$unset": {
                 "blocks": "",
+                "labor_total": "",
+                "parts_total": "",
+                "grand_total": "",
             },
         }
     )
@@ -1182,7 +1231,8 @@ def api_work_order_payment(work_order_id):
         return jsonify({"ok": False, "error": "invalid_amount"}), 200
 
     # Get work order grand total
-    grand_total = round2(wo.get("grand_total") or 0)
+    totals_doc = wo.get("totals") if isinstance(wo.get("totals"), dict) else {}
+    grand_total = round2(totals_doc.get("grand_total") if totals_doc.get("grand_total") is not None else wo.get("grand_total") or 0)
 
     # Get payments already made
     existing_payments = list(
@@ -1263,7 +1313,8 @@ def api_get_work_order_payments(work_order_id):
     if not wo:
         return jsonify({"ok": False, "error": "work_order_not_found"}), 200
 
-    grand_total = round2(wo.get("grand_total") or 0)
+    totals_doc = wo.get("totals") if isinstance(wo.get("totals"), dict) else {}
+    grand_total = round2(totals_doc.get("grand_total") if totals_doc.get("grand_total") is not None else wo.get("grand_total") or 0)
 
     payments = list(
         shop_db.work_order_payments.find({"work_order_id": wo_id, "is_active": True})
