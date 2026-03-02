@@ -276,6 +276,9 @@
           </div>
         </div>
       </td>
+      <td class="text-center">
+        <button type="button" class="btn btn-sm btn-outline-danger delete-part-row" title="Delete this part">×</button>
+      </td>
     `;
     return tr;
   }
@@ -2084,6 +2087,53 @@
     });
 
     blocksContainer.addEventListener("click", function (e) {
+      // -------- delete part row --------
+      const deletePartBtn = e.target.closest(".delete-part-row");
+      if (deletePartBtn) {
+        e.preventDefault();
+        const row = deletePartBtn.closest("tr.parts-row");
+        if (row) {
+          const blockEl = row.closest(".wo-labor");
+          
+          // Remove only auto misc charges for THIS part row (keep manual charges and charges from other parts)
+          if (blockEl) {
+            const tbody = blockEl.querySelector(".partsTbody");
+            const rows = Array.from(tbody.querySelectorAll("tr.parts-row"));
+            const rowIndex = rows.indexOf(row);
+            
+            const firstRow = rows[0];
+            if (firstRow && rowIndex >= 0) {
+              const miscInput = firstRow.querySelector(".part-misc-charge-description");
+              if (miscInput) {
+                const items = getMiscItemsArray(firstRow);
+                // Keep only: manual items + items from OTHER parts (not this row)
+                const filteredItems = items.filter(item => 
+                  item.manual === true || item.partIndex !== rowIndex
+                );
+                saveMiscItemsArray(firstRow, filteredItems);
+              }
+              
+              // Also update baseline (remove auto items for this row)
+              try {
+                const baseline = JSON.parse(firstRow.dataset.autoMiscItemsBaseline || "[]");
+                const filteredBaseline = baseline.filter(item => item.partIndex !== rowIndex);
+                firstRow.dataset.autoMiscItemsBaseline = JSON.stringify(filteredBaseline);
+              } catch (err) {
+                // Ignore parsing errors
+              }
+              
+              // Render the misc charges table (will show remaining charges)
+              renderMiscChargesTable(blockEl);
+            }
+          }
+          
+          row.remove();
+          recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+        }
+        return;
+      }
+
+      // -------- delete misc charge --------
       const btn = e.target.closest(".misc-delete-btn");
       if (!btn) return;
       
