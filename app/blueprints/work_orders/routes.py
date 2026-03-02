@@ -1146,6 +1146,23 @@ def create_work_order():
         # If you prefer to cancel, uncomment the redirect below
         # return redirect(url_for("work_orders.work_order_details_page", customer_id=str(customer_id), unit_id=str(unit_id)))
 
+    # ✅ Update unit mileage if provided
+    unit_mileage = request.form.get("unit_mileage")
+    if unit_mileage:
+        try:
+            shop_db.units.update_one(
+                {"_id": unit_id, "shop_id": shop["_id"], "is_active": True},
+                {
+                    "$set": {
+                        "mileage": unit_mileage,
+                        "updated_at": now,
+                        "updated_by": user_id,
+                    }
+                }
+            )
+        except Exception:
+            pass  # Silently ignore mileage update errors
+
     doc = {
         "shop_id": shop["_id"],
         "tenant_id": shop.get("tenant_id"),
@@ -1412,6 +1429,7 @@ def api_work_order_update(work_order_id):
     data = request.get_json(silent=True) or {}
     labors = data.get("labors", data.get("blocks"))
     totals = normalize_totals_payload(data.get("totals") or {})
+    unit_mileage = data.get("unit_mileage")
 
     if not isinstance(labors, list):
         return jsonify({"ok": False, "error": "labors_required"}), 200
@@ -1435,6 +1453,24 @@ def api_work_order_update(work_order_id):
             "error": "inventory_adjustment_failed",
             "details": inventory_adjustment["errors"]
         }), 200
+
+    # ✅ Update unit mileage if provided
+    if unit_mileage is not None:
+        unit_id = wo.get("unit_id")
+        if unit_id:
+            try:
+                shop_db.units.update_one(
+                    {"_id": unit_id, "shop_id": shop["_id"], "is_active": True},
+                    {
+                        "$set": {
+                            "mileage": unit_mileage,
+                            "updated_at": now,
+                            "updated_by": user_id,
+                        }
+                    }
+                )
+            except Exception:
+                pass  # Silently ignore mileage update errors
 
     shop_db.work_orders.update_one(
         {"_id": wo_id},

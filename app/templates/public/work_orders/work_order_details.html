@@ -26,7 +26,7 @@
     <!-- Unit select (NO reload) -->
     <div class="mb-4">
       <div class="row g-3 align-items-end">
-        <div class="col-md-8">
+        <div class="col-md-6">
           <label class="form-label">Unit</label>
           <select id="unitSelect" name="unit_id" class="form-select" {% if not selected_customer_id %}disabled{% endif %}>
             <option value="">-- Select unit --</option>
@@ -36,6 +36,11 @@
               </option>
             {% endfor %}
           </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">Mileage</label>
+          <input id="unitMileageInput" type="number" class="form-control" inputmode="numeric" placeholder="0"/>
         </div>
 
         <div class="col-md-4">
@@ -135,6 +140,7 @@
       <!-- hidden ids that JS updates (important) -->
       <input type="hidden" id="selectedCustomerHidden" name="customer_id" value="{{ selected_customer_id or '' }}"/>
       <input type="hidden" id="selectedUnitHidden" name="unit_id" value="{{ selected_unit_id or '' }}"/>
+      <input type="hidden" id="unitMileageHidden" name="unit_mileage" value=""/>
 
       <!-- info -->
       <div id="selectHint" class="alert alert-info mb-3" {% if selected_unit_id %}style="display:none;"{% endif %}>

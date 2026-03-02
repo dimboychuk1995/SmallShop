@@ -1383,6 +1383,14 @@
     return Array.isArray(data.items) ? data.items : [];
   }
 
+  async function fetchUnitDetails(unitId) {
+    const url = `/work_orders/api/unit?id=${encodeURIComponent(unitId)}`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.ok && data.item ? data.item : null;
+  }
+
   // ---------------- restore initial data ----------------
   function ensureBlocksCount(blocksContainer, desiredCount) {
     const blocks = Array.from(blocksContainer.querySelectorAll(".wo-labor"));
@@ -1789,6 +1797,8 @@
     const unitYearInput = $("unitYearInput");
     const unitTypeInput = $("unitTypeInput");
     const vinLoadingSpinner = $("vinLoadingSpinner");
+      const unitMileageInput = $("unitMileageInput");
+    const unitMileageHidden = $("unitMileageHidden");
 
     const assignMechanicsModal = $("assignMechanicsModal");
     const assignMechanicsTbody = $("assignMechanicsTbody");
@@ -2003,6 +2013,11 @@
       // ✅ перед отправкой формы на create кладём totals_json
       const totals = serializeTotals(blocksContainer);
       upsertHiddenJsonInput(woForm, "totals_json", totals);
+      
+      // ✅ Sync mileage to hidden field before submit
+      if (unitMileageInput && unitMileageHidden) {
+        unitMileageHidden.value = String(unitMileageInput.value || "").trim();
+      }
 
       if (typeof woForm.requestSubmit === "function") woForm.requestSubmit();
       else woForm.submit();
@@ -2233,6 +2248,10 @@
         setSelectOptions(unitSel, [], customerId ? "Loading…" : "-- Select unit --");
         unitSel.value = "";
       }
+      
+      // Clear mileage when customer changes
+      if (unitMileageInput) unitMileageInput.value = "";
+      if (unitMileageHidden) unitMileageHidden.value = "";
 
       setEditorEnabled(false);
 
@@ -2250,10 +2269,30 @@
       }
     });
 
-    unitSel?.addEventListener("change", function () {
+    unitSel?.addEventListener("change", async function () {
       const unitId = String(unitSel.value || "").trim();
       if (unitHidden) unitHidden.value = unitId;
       setEditorEnabled(!!unitId);
+      
+      // Clear mileage if no unit selected
+      if (!unitId) {
+        if (unitMileageInput) unitMileageInput.value = "";
+        if (unitMileageHidden) unitMileageHidden.value = "";
+        return;
+      }
+      
+      // Fetch and display current mileage
+      const unitDetails = await fetchUnitDetails(unitId);
+      if (unitDetails) {
+        if (unitMileageInput) unitMileageInput.value = unitDetails.mileage || "";
+        if (unitMileageHidden) unitMileageHidden.value = unitDetails.mileage || "";
+      }
+    });
+
+    // Update hidden mileage field when user changes the mileage input
+    unitMileageInput?.addEventListener("change", function () {
+      const mileageValue = String(unitMileageInput.value || "").trim();
+      if (unitMileageHidden) unitMileageHidden.value = mileageValue;
     });
 
     // dropdown
@@ -2443,10 +2482,13 @@
       try {
         const labors = serializeBlocks(blocksContainer);
         const totals = serializeTotals(blocksContainer);
+        
+        // ✅ Get current mileage from input
+        const unit_mileage = unitMileageInput ? String(unitMileageInput.value || "").trim() : "";
 
         await apiPostJson(
           `/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/update`,
-          { labors, totals }
+          { labors, totals, unit_mileage: unit_mileage ? unit_mileage : undefined }
         );
 
         // после сохранения снова лочим
@@ -2518,6 +2560,20 @@
 
     if (isCreated) {
       applyTotalsSnapshotToUi(blocksContainer, totalsSnapshot, shopSupplyPct);
+      
+      // ✅ Load unit mileage when editing an existing work order
+      (async () => {
+        const selectedUnitId = String(unitSel?.value || "").trim();
+        if (selectedUnitId) {
+          const unitDetails = await fetchUnitDetails(selectedUnitId);
+          if (unitDetails) {
+            if (unitMileageInput) {
+              unitMileageInput.value = unitDetails.mileage || "";
+              if (unitMileageHidden) unitMileageHidden.value = unitDetails.mileage || "";
+            }
+          }
+        }
+      })();
     }
 
     // Payment modal handler
