@@ -184,34 +184,23 @@
                     <td>{{ o.vendor }}</td>
                     <td class="text-end">{{ o.items_count }}</td>
                     <td>
-                      <span class="badge {% if o.status == 'received' %}bg-success{% else %}bg-warning text-dark{% endif %}">
-                        {{ o.status or 'ordered' }}
-                      </span>
+                      {% if o.status == 'received' %}
+                        <span class="badge bg-success">{{ o.status or 'ordered' }}</span>
+                      {% else %}
+                        <button type="button" class="btn btn-sm btn-warning text-dark receiveStatusBtn" 
+                                data-order-id="{{ o.id }}" 
+                                title="Click to receive this order">
+                          <span class="badge bg-warning text-dark">{{ o.status or 'ordered' }}</span>
+                        </button>
+                      {% endif %}
                     </td>
                     <td>{{ o.created_at }}</td>
                     <td class="text-end">
-                      {% if o.status == 'received' %}
-                        <button type="button" class="btn btn-sm btn-outline-success receiveOrderBtn" 
-                                data-order-id="{{ o.id }}" title="Already received" disabled>
-                          <i class="bi bi-check-circle me-1"></i> Received
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-warning unreceiveOrderBtn" 
-                                data-order-id="{{ o.id }}" 
-                                title="Unreceive to edit or delete">
-                          <i class="bi bi-arrow-counterclockwise me-1"></i> Unreceive
-                        </button>
-                      {% else %}
-                        <button type="button" class="btn btn-sm btn-outline-success receiveOrderBtn" 
-                                data-order-id="{{ o.id }}" 
-                                title="Mark as received">
-                          <i class="bi bi-check-circle me-1"></i> Receive
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary editOrderBtn" 
-                                data-order-id="{{ o.id }}"
-                                data-bs-toggle="modal" data-bs-target="#orderModal">
-                          <i class="bi bi-pencil me-1"></i> Edit
-                        </button>
-                      {% endif %}
+                      <button type="button" class="btn btn-sm btn-outline-primary editOrderBtn" 
+                              data-order-id="{{ o.id }}"
+                              data-bs-toggle="modal" data-bs-target="#orderModal">
+                        <i class="bi bi-pencil me-1"></i> Edit
+                      </button>
                       <button type="button" class="btn btn-sm btn-outline-danger deleteOrderBtn" 
                               data-order-id="{{ o.id }}"
                               title="Delete order">
@@ -454,6 +443,14 @@
       </div>
 
       <div class="modal-footer">
+        <div class="me-auto">
+          <button type="button" class="btn btn-sm btn-outline-success" id="receiveOrderModalBtn" style="display:none;">
+            <i class="bi bi-check-circle me-1"></i> Receive Order
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-warning" id="unreceiveOrderModalBtn" style="display:none;">
+            <i class="bi bi-arrow-counterclockwise me-1"></i> Unreceive Order
+          </button>
+        </div>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
         <button type="button" class="btn btn-primary" id="createOrderBtn">Create order</button>
       </div>

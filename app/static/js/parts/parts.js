@@ -94,8 +94,11 @@
 		const orderCreatedBox = document.getElementById("orderCreatedBox");
 		const orderAlert = document.getElementById("orderAlert");
 		const orderTotalAmount = document.getElementById("orderTotalAmount");
+		const receiveOrderModalBtn = document.getElementById("receiveOrderModalBtn");
+		const unreceiveOrderModalBtn = document.getElementById("unreceiveOrderModalBtn");
 
 		let orderItems = [];
+		let currentOrderStatus = null;
 
 			if (!vendorSelect || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !receiveBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount) {
 			return;
@@ -184,6 +187,11 @@
 			const pid = item.id;
 			if (!pid) return;
 
+			// Prevent adding items if order is received
+			if (vendorSelect.disabled) {
+				return;
+			}
+
 			const existing = itemsBody.querySelector(`tr[data-part-id="${pid}"]`);
 			if (existing) {
 				const qtyInput = existing.querySelector(".qty-input");
@@ -243,6 +251,8 @@
 				return;
 			}
 			ensureEmptyRowRemoved();
+			const isReceived = currentOrderStatus === "received";
+			
 			orderItems.forEach(item => {
 				const coreIndicator = item.core_has_charge && item.core_cost > 0
 					? `<span class="badge bg-warning text-dark ms-1" title="Core charge: $${Number(item.core_cost).toFixed(2)} per unit">Core</span>`
@@ -252,17 +262,22 @@
 				tr.setAttribute("data-part-id", item.part_id);
 				tr.setAttribute("data-core-has-charge", item.core_has_charge ? "true" : "false");
 				tr.setAttribute("data-core-cost", item.core_cost || "0");
+				
+				const removeBtn = isReceived
+					? `<button type="button" class="btn btn-sm btn-outline-danger remove-item-btn" disabled title="Unreceive order to delete items">Remove</button>`
+					: `<button type="button" class="btn btn-sm btn-outline-danger remove-item-btn">Remove</button>`;
+				
 				tr.innerHTML = `
 					<td class="fw-semibold">${escapeHtml(item.part_number)}${coreIndicator}</td>
 					<td class="text-muted">${escapeHtml(item.description) || "-"}</td>
 					<td class="text-end">
-						<input class="form-control form-control-sm text-end qty-input" type="number" min="1" step="1" value="${item.quantity}" required>
+						<input class="form-control form-control-sm text-end qty-input" type="number" min="1" step="1" value="${item.quantity}" required ${isReceived ? 'disabled' : ''}>
 					</td>
 					<td class="text-end">
-						<input class="form-control form-control-sm text-end price-input" type="number" min="0" step="0.01" value="${item.price}" required>
+						<input class="form-control form-control-sm text-end price-input" type="number" min="0" step="0.01" value="${item.price}" required ${isReceived ? 'disabled' : ''}>
 					</td>
 					<td class="text-end">
-						<button type="button" class="btn btn-sm btn-outline-danger remove-item-btn">Remove</button>
+						${removeBtn}
 					</td>
 				`;
 				itemsBody.appendChild(tr);
@@ -272,6 +287,10 @@
 
 		vendorSelect.addEventListener("change", function () {
 			clearError();
+			// Don't allow vendor change if order is received
+			if (vendorSelect.disabled) {
+				return;
+			}
 			partSearch.disabled = !vendorSelect.value;
 			partSearch.value = "";
 			hideDropdown();
@@ -328,6 +347,12 @@
 		itemsBody.addEventListener("click", function (e) {
 			const btn = e.target.closest(".remove-item-btn");
 			if (!btn) return;
+			
+			// Prevent deletion if received
+			if (btn.disabled || vendorSelect.disabled) {
+				return;
+			}
+			
 			const tr = btn.closest("tr");
 			if (tr) tr.remove();
 			ensureEmptyRowShown();
@@ -349,6 +374,12 @@
 
 			const rows = Array.from(itemsBody.querySelectorAll("tr[data-part-id]"));
 			if (rows.length === 0) { showError("Add at least one item."); return; }
+
+			// Check if order is received
+			if (vendorSelect.disabled) {
+				showError("Cannot update received orders. Click 'Unreceive' first.");
+				return;
+			}
 
 			const items = [];
 			for (const tr of rows) {
@@ -442,6 +473,64 @@
 		createOrderBtn.addEventListener("click", createOrderAjax);
 		receiveBtn.addEventListener("click", receiveOrderAjax);
 
+		// Receive order button in modal
+		if (receiveOrderModalBtn) {
+			receiveOrderModalBtn.addEventListener("click", async function () {
+				const orderId = createdOrderId.value;
+				if (!orderId) return;
+
+				if (confirm("Mark this order as received?")) {
+					try {
+						const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/receive`, {
+							method: "POST"
+						});
+						const data = await res.json();
+
+						if (data.ok) {
+							alert(`Order received! ${data.updated_parts} parts updated.`);
+							const modalEl = document.getElementById("orderModal");
+							const modal = window.bootstrap?.Modal?.getInstance(modalEl);
+							if (modal) modal.hide();
+							location.reload();
+						} else {
+							alert("Error: " + (data.error || "Failed to receive order"));
+						}
+					} catch (err) {
+						alert("Network error while receiving order");
+					}
+				}
+			});
+		}
+
+		// Unreceive order button in modal
+		if (unreceiveOrderModalBtn) {
+			unreceiveOrderModalBtn.addEventListener("click", async function () {
+				const orderId = createdOrderId.value;
+				if (!orderId) return;
+
+				if (confirm("Unreceive this order? Items will be removed from inventory.")) {
+					try {
+						const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/unreceive`, {
+							method: "POST"
+						});
+						const data = await res.json();
+
+						if (data.ok) {
+							alert(`Order unreceived! ${data.updated_parts} parts removed from inventory.`);
+							const modalEl = document.getElementById("orderModal");
+							const modal = window.bootstrap?.Modal?.getInstance(modalEl);
+							if (modal) modal.hide();
+							location.reload();
+						} else {
+							alert("Error: " + (data.error || "Failed to unreceive order"));
+						}
+					} catch (err) {
+						alert("Network error while unreceiving order");
+					}
+				}
+			});
+		}
+
 		// Load order data when Edit button clicked
 		document.addEventListener("click", async function (e) {
 			const btn = e.target.closest(".editOrderBtn");
@@ -464,12 +553,24 @@
 				}
 
 				const order = data.order;			
+			currentOrderStatus = order.status;
+			// Show/hide receive/unreceive buttons based on status
+			const isReceived = order.status === "received";
+			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = isReceived ? "none" : "block";
+			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = isReceived ? "block" : "none";
+			
 			// Prevent editing received orders
-			if (order.status === "received") {
-				showError("Cannot edit received orders. Click 'Unreceive' first to modify or delete.");
-				return;
+			if (isReceived) {
+				vendorSelect.disabled = true;
+				partSearch.disabled = true;
+				createOrderBtn.disabled = true;
+			} else {
+				vendorSelect.disabled = false;
+				partSearch.disabled = !vendorSelect.value;
+				createOrderBtn.disabled = false;
 			}
-							// Set vendor
+			
+			// Set vendor
 				vendorSelect.value = order.vendor_id || "";
 				// Clear current items
 				orderItems = [];
@@ -500,6 +601,7 @@
 		const orderModal = document.getElementById("orderModal");
 		orderModal?.addEventListener("hidden.bs.modal", function () {
 			vendorSelect.value = "";
+			vendorSelect.disabled = false;
 			partSearch.value = "";
 			partSearch.disabled = true;
 			dropdown.style.display = "none";
@@ -509,6 +611,9 @@
 			orderCreatedBox.classList.add("d-none");
 			orderAlert.classList.add("d-none");
 			createOrderBtn.textContent = "Create order";
+			createOrderBtn.disabled = false;
+			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = "none";
+			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = "none";
 		});
 
 		const partHistoryModal = document.getElementById("partHistoryModal");
@@ -637,14 +742,16 @@
 			`;
 			
 			orderTotalAmount.textContent = "$0.00";
+			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = "none";
+			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = "none";
 		});
 
-		// ---- Order List Management (Receive, Unreceive, Delete from Orders tab) ----
+		// ---- Order List Management (Receive from Status, Delete from Orders tab) ----
 		document.addEventListener("click", async function (e) {
-			// Receive order button
-			const receiveBtn = e.target.closest(".receiveOrderBtn");
-			if (receiveBtn) {
-				const orderId = receiveBtn.getAttribute("data-order-id");
+			// Receive order by clicking on status button
+			const receiveStatusBtn = e.target.closest(".receiveStatusBtn");
+			if (receiveStatusBtn) {
+				const orderId = receiveStatusBtn.getAttribute("data-order-id");
 				if (!orderId) return;
 
 				if (confirm("Mark this order as received?")) {
@@ -662,32 +769,6 @@
 						}
 					} catch (err) {
 						alert("Network error while receiving order");
-					}
-				}
-				return;
-			}
-
-			// Unreceive order button
-			const unreceiveBtn = e.target.closest(".unreceiveOrderBtn");
-			if (unreceiveBtn) {
-				const orderId = unreceiveBtn.getAttribute("data-order-id");
-				if (!orderId) return;
-
-				if (confirm("Unreceive this order? Items will be removed from inventory.")) {
-					try {
-						const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/unreceive`, {
-							method: "POST"
-						});
-						const data = await res.json();
-
-						if (data.ok) {
-							alert(`Order unreceived! ${data.updated_parts} parts removed from inventory.`);
-							location.reload();
-						} else {
-							alert("Error: " + (data.error || "Failed to unreceive order"));
-						}
-					} catch (err) {
-						alert("Network error while unreceiving order");
 					}
 				}
 				return;
