@@ -685,7 +685,7 @@
 				partHistoryWorkOrdersBody.innerHTML = workOrders.map((row) => {
 					const woNum = row.wo_number || (row.work_order_id ? `#${row.work_order_id.slice(-6)}` : "-");
 					return `
-					<tr>
+					<tr style="cursor: pointer;" class="workOrderHistoryRow" data-wo-id="${row.work_order_id}">
 						<td><span class="badge bg-secondary">${woNum}</span></td>
 						<td>${escapeHtml(row.status || "-")}</td>
 						<td>${escapeHtml(row.customer || "-")}</td>
@@ -710,6 +710,14 @@
 			const partId = btn.getAttribute("data-part-id");
 			if (!partId) return;
 			loadPartHistory(partId);
+		});
+
+		document.addEventListener("click", function (e) {
+			const woRow = e.target.closest(".workOrderHistoryRow");
+			if (!woRow) return;
+			const woId = woRow.getAttribute("data-wo-id");
+			if (!woId) return;
+			window.open(`/work_orders/details?work_order_id=${woId}`, "_blank");
 		});
 
 		partHistoryModal?.addEventListener("hidden.bs.modal", function () {
