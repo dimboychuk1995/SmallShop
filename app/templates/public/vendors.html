@@ -37,8 +37,19 @@
           </thead>
           <tbody>
             {% for v in vendors %}
-            <tr>
-              <td class="fw-semibold">{{ v.get('name', '—') }}</td>
+            <tr class="vendorOrdersRow" data-vendor-id="{{ v['_id'] }}" data-vendor-name="{{ (v.get('name') or 'Vendor')|e }}" role="button" tabindex="0" style="cursor:pointer;">
+              <td>
+                <button
+                  type="button"
+                  class="btn btn-link p-0 fw-semibold text-decoration-none openVendorOrdersBtn"
+                  data-vendor-id="{{ v['_id'] }}"
+                  data-vendor-name="{{ (v.get('name') or 'Vendor')|e }}"
+                  data-bs-toggle="modal"
+                  data-bs-target="#vendorOrdersModal"
+                >
+                  {{ v.get('name', '—') }}
+                </button>
+              </td>
               <td>{{ v.get('phone') or '—' }}</td>
               <td>{{ v.get('email') or '—' }}</td>
 
@@ -188,6 +199,48 @@
           <button type="submit" class="btn btn-primary" id="vendorSubmitBtn">Create Vendor</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Vendor Part Orders Modal -->
+<div class="modal fade" id="vendorOrdersModal" tabindex="-1" aria-labelledby="vendorOrdersModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="vendorOrdersModalLabel">Vendor Orders</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="small text-muted" id="vendorOrdersSummary">Loading...</div>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Vendor orders pagination">
+            <button type="button" class="btn btn-outline-secondary" id="vendorOrdersPrevBtn">Prev</button>
+            <button type="button" class="btn btn-outline-secondary" id="vendorOrdersNextBtn">Next</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr class="text-muted">
+                <th>Order #</th>
+                <th class="text-end">Items</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="vendorOrdersTableBody">
+              <tr>
+                <td colspan="4" class="text-center text-muted py-4">Select a vendor to see part orders.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
     </div>
   </div>
 </div>

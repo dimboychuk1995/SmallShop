@@ -17,6 +17,157 @@
   const notesInput = document.getElementById('vendorNotes');
   const isActiveInput = document.getElementById('vendorIsActive');
 
+  const ordersModalEl = document.getElementById('vendorOrdersModal');
+  const ordersTitle = document.getElementById('vendorOrdersModalLabel');
+  const ordersSummary = document.getElementById('vendorOrdersSummary');
+  const ordersBody = document.getElementById('vendorOrdersTableBody');
+  const ordersPrevBtn = document.getElementById('vendorOrdersPrevBtn');
+  const ordersNextBtn = document.getElementById('vendorOrdersNextBtn');
+
+  const ordersState = {
+    vendorId: '',
+    vendorName: '',
+    page: 1,
+    perPage: 10,
+    pagination: null,
+  };
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, function(ch) {
+      if (ch === '&') return '&amp;';
+      if (ch === '<') return '&lt;';
+      if (ch === '>') return '&gt;';
+      if (ch === '"') return '&quot;';
+      return '&#39;';
+    });
+  }
+
+  function renderStatusBadge(status) {
+    const normalized = String(status || 'ordered').toLowerCase();
+    if (normalized === 'received') {
+      return '<span class="badge bg-success">received</span>';
+    }
+    return '<span class="badge bg-warning text-dark">' + escapeHtml(normalized) + '</span>';
+  }
+
+  function setOrdersLoading(message) {
+    if (ordersBody) {
+      ordersBody.innerHTML =
+        '<tr><td colspan="4" class="text-center text-muted py-4">' + escapeHtml(message) + '</td></tr>';
+    }
+  }
+
+  function updateOrdersPaginationControls() {
+    const pg = ordersState.pagination;
+    const hasPrev = !!(pg && pg.has_prev);
+    const hasNext = !!(pg && pg.has_next);
+
+    if (ordersPrevBtn) ordersPrevBtn.disabled = !hasPrev;
+    if (ordersNextBtn) ordersNextBtn.disabled = !hasNext;
+  }
+
+  async function loadVendorOrders(page) {
+    if (!ordersState.vendorId) return;
+
+    const targetPage = Number(page) > 0 ? Number(page) : 1;
+    ordersState.page = targetPage;
+    ordersState.pagination = null;
+    updateOrdersPaginationControls();
+    setOrdersLoading('Loading part orders...');
+
+    try {
+      const url = '/vendors/api/' + encodeURIComponent(ordersState.vendorId)
+        + '/part-orders?page=' + encodeURIComponent(String(targetPage))
+        + '&per_page=' + encodeURIComponent(String(ordersState.perPage));
+
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setOrdersLoading(data?.error || 'Failed to load part orders.');
+        if (ordersSummary) ordersSummary.textContent = 'Unable to load data.';
+        return;
+      }
+
+      const vendorName = data?.vendor?.name || ordersState.vendorName || 'Vendor';
+      ordersState.vendorName = vendorName;
+      ordersState.pagination = data.pagination || null;
+
+      if (ordersTitle) {
+        ordersTitle.textContent = 'Part Orders - ' + vendorName;
+      }
+
+      const pg = ordersState.pagination || {};
+      if (ordersSummary) {
+        ordersSummary.textContent = 'Page ' + String(pg.page || 1)
+          + ' of ' + String(pg.pages || 1)
+          + ' · ' + String(pg.total || 0) + ' total';
+      }
+
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!ordersBody) return;
+
+      if (items.length === 0) {
+        ordersBody.innerHTML =
+          '<tr><td colspan="4" class="text-center text-muted py-4">No part orders for this vendor.</td></tr>';
+      } else {
+        ordersBody.innerHTML = items.map(function(item) {
+          return '<tr>'
+            + '<td><span class="badge bg-secondary">' + escapeHtml(item.order_number || '-') + '</span></td>'
+            + '<td class="text-end">' + escapeHtml(String(item.items_count ?? 0)) + '</td>'
+            + '<td>' + renderStatusBadge(item.status) + '</td>'
+            + '<td>' + escapeHtml(item.created_at || '-') + '</td>'
+            + '</tr>';
+        }).join('');
+      }
+
+      updateOrdersPaginationControls();
+    } catch (err) {
+      setOrdersLoading('Network error while loading part orders.');
+      if (ordersSummary) ordersSummary.textContent = 'Unable to load data.';
+    }
+  }
+
+  function openVendorOrders(vendorId, vendorName) {
+    if (!vendorId) return;
+
+    ordersState.vendorId = vendorId;
+    ordersState.vendorName = vendorName || 'Vendor';
+    ordersState.page = 1;
+    ordersState.pagination = null;
+
+    if (ordersTitle) {
+      ordersTitle.textContent = 'Part Orders - ' + ordersState.vendorName;
+    }
+    if (ordersSummary) {
+      ordersSummary.textContent = 'Loading...';
+    }
+    updateOrdersPaginationControls();
+    setOrdersLoading('Loading part orders...');
+
+    if (ordersModalEl && window.bootstrap && window.bootstrap.Modal) {
+      window.bootstrap.Modal.getOrCreateInstance(ordersModalEl).show();
+      return;
+    }
+
+    // Fallback if global bootstrap object is unavailable.
+    loadVendorOrders(1);
+  }
+
+  ordersModalEl?.addEventListener('show.bs.modal', function(e) {
+    const trigger = e.relatedTarget;
+    const vendorId = trigger?.getAttribute('data-vendor-id') || ordersState.vendorId;
+    const vendorName = trigger?.getAttribute('data-vendor-name') || ordersState.vendorName || 'Vendor';
+    if (!vendorId) return;
+
+    ordersState.vendorId = vendorId;
+    ordersState.vendorName = vendorName;
+    loadVendorOrders(1);
+  });
+
   // Reset form when modal opens for create
   modal?.addEventListener('show.bs.modal', function(e) {
     const triggerBtn = e.relatedTarget;
@@ -77,6 +228,63 @@
     } catch (err) {
       alert('Network error while loading vendor data');
     }
+  });
+
+  // Open orders modal by clicking vendor row, excluding interactive controls.
+  document.addEventListener('click', function(e) {
+    const row = e.target.closest('.vendorOrdersRow');
+    if (!row) return;
+
+    if (e.target.closest('a, button, form, input, select, textarea, label')) {
+      return;
+    }
+
+    const opener = row.querySelector('.openVendorOrdersBtn');
+    if (opener) {
+      opener.click();
+      return;
+    }
+
+    const vendorId = row.getAttribute('data-vendor-id') || '';
+    const vendorName = row.getAttribute('data-vendor-name') || 'Vendor';
+    openVendorOrders(vendorId, vendorName);
+  });
+
+  // Keyboard support for clickable row.
+  document.addEventListener('keydown', function(e) {
+    const row = e.target.closest('.vendorOrdersRow');
+    if (!row) return;
+
+    if (e.target.closest('a, button, form, input, select, textarea, label')) {
+      return;
+    }
+
+    if (e.key !== 'Enter' && e.key !== ' ') {
+      return;
+    }
+
+    e.preventDefault();
+    const opener = row.querySelector('.openVendorOrdersBtn');
+    if (opener) {
+      opener.click();
+      return;
+    }
+
+    const vendorId = row.getAttribute('data-vendor-id') || '';
+    const vendorName = row.getAttribute('data-vendor-name') || 'Vendor';
+    openVendorOrders(vendorId, vendorName);
+  });
+
+  ordersPrevBtn?.addEventListener('click', function() {
+    const pg = ordersState.pagination;
+    if (!pg || !pg.has_prev) return;
+    loadVendorOrders(pg.prev_page);
+  });
+
+  ordersNextBtn?.addEventListener('click', function() {
+    const pg = ordersState.pagination;
+    if (!pg || !pg.has_next) return;
+    loadVendorOrders(pg.next_page);
   });
 
   // Handle form submission

@@ -21,6 +21,15 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+def _fmt_dt_label(dt):
+    if isinstance(dt, datetime):
+        try:
+            return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return dt.strftime("%Y-%m-%d %H:%M")
+    return "-"
+
+
 def _oid(value):
     if not value:
         return None
@@ -291,6 +300,71 @@ def vendors_api_get(vendor_id):
             "is_active": vendor.get("is_active", True),
         }
     })
+
+
+@vendors_bp.get("/api/<vendor_id>/part-orders")
+@login_required
+@permission_required("vendors.view")
+def vendors_api_part_orders(vendor_id):
+    coll, shop, master = _vendors_collection()
+    if coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop not configured"}), 400
+
+    vid = _oid(vendor_id)
+    if not vid:
+        return jsonify({"ok": False, "error": "Invalid vendor id"}), 400
+
+    vendor = coll.find_one({"_id": vid, "shop_id": shop["_id"]})
+    if not vendor:
+        return jsonify({"ok": False, "error": "Vendor not found"}), 404
+
+    page, per_page = get_pagination_params(request.args, default_per_page=10, max_per_page=100)
+    orders_coll = coll.database.parts_orders
+
+    query = {
+        "shop_id": shop["_id"],
+        "vendor_id": vid,
+        "is_active": {"$ne": False},
+    }
+
+    orders, pagination = paginate_find(
+        orders_coll,
+        query,
+        [("created_at", -1)],
+        page,
+        per_page,
+        projection={
+            "order_number": 1,
+            "status": 1,
+            "items": 1,
+            "created_at": 1,
+        },
+    )
+
+    items = []
+    for order in orders:
+        raw_items = order.get("items") if isinstance(order.get("items"), list) else []
+        items.append(
+            {
+                "id": str(order.get("_id")),
+                "order_number": order.get("order_number") or "-",
+                "status": (order.get("status") or "ordered").strip().lower(),
+                "items_count": len(raw_items),
+                "created_at": _fmt_dt_label(order.get("created_at")),
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "vendor": {
+                "id": str(vendor.get("_id")),
+                "name": vendor.get("name") or "-",
+            },
+            "items": items,
+            "pagination": pagination,
+        }
+    )
 
 
 @vendors_bp.post("/api/<vendor_id>/update")
