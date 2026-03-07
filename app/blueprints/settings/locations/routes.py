@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import hashlib
 from datetime import datetime, timezone
+from zoneinfo import available_timezones
 
 from bson import ObjectId
 from flask import render_template, request, redirect, url_for, flash, session, jsonify
@@ -13,6 +14,32 @@ from app.utils.auth import login_required, SESSION_USER_ID, SESSION_TENANT_ID
 from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 from app.utils.layout import build_app_layout_context
+
+
+COMMON_TIMEZONES = [
+    "UTC",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Phoenix",
+    "America/Anchorage",
+    "Pacific/Honolulu",
+    "America/Toronto",
+    "America/Vancouver",
+    "America/Mexico_City",
+    "Europe/London",
+    "Europe/Berlin",
+    "Europe/Paris",
+    "Europe/Warsaw",
+    "Europe/Kyiv",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Bangkok",
+    "Asia/Singapore",
+    "Asia/Tokyo",
+    "Australia/Sydney",
+]
 
 
 # -----------------------------
@@ -459,60 +486,108 @@ def locations_index():
         session.clear()
         return redirect(url_for("main.index"))
 
+    active_shop_raw = (session.get("shop_id") or "").strip()
+    active_shop_oid = _maybe_object_id(active_shop_raw)
+
     # -----------------------------
-    # Create (POST)
+    # Update timezone for active shop (POST)
     # -----------------------------
     if request.method == "POST":
-        name = (request.form.get("name") or "").strip()
-        address = (request.form.get("address") or "").strip()
-        phone = (request.form.get("phone") or "").strip()
-
-        if len(name) < 2:
-            flash("Shop name is required.", "error")
+        selected_tz = (request.form.get("timezone") or "").strip()
+        if not active_shop_oid:
+            flash("Active shop is not selected.", "error")
             return redirect(url_for("settings.locations_index"))
 
-        tenant_slug = tenant.get("slug") or slugify_shop_name(tenant.get("name") or "tenant")
-        shop_slug = slugify_shop_name(name)
-
-        if master.shops.find_one({"tenant_id": tenant["_id"], "slug": shop_slug}):
-            flash("Shop with this name already exists.", "error")
+        if not selected_tz:
+            flash("Timezone is required.", "error")
             return redirect(url_for("settings.locations_index"))
 
-        shop_db_name = make_shop_db_name(tenant_slug, shop_slug)
-
-        shop_doc = {
-            "tenant_id": tenant["_id"],
-            "name": name,
-            "slug": shop_slug,
-            "db_name": shop_db_name,
-            "address": address or None,
-            "phone": phone or None,
-            "status": "active",
-            "is_active": True,
-            "is_primary": False,
-            "created_at": utcnow(),
-            "updated_at": utcnow(),
-        }
-
+        # On some environments timezone database may be unavailable.
+        # Validate against IANA set only when it can be loaded.
+        valid_timezones = set()
         try:
-            res = master.shops.insert_one(shop_doc)
-            new_shop_id = res.inserted_id
-
-            # ✅ IMPORTANT: нужен _id для seed parts_categories / labor_rates
-            shop_doc["_id"] = new_shop_id
-
-            # ✅ доступ выдаём только owners
-            _grant_shop_to_owners(master, tenant["_id"], new_shop_id)
-
-            # ✅ создать shop DB + seed parts_categories + pricing rules + labor rates
-            init_shop_database(shop_db_name, tenant, shop_doc, actor_user_id=user.get("_id"))
-
-            flash("Shop created successfully.", "success")
+            valid_timezones = set(available_timezones())
+        except Exception:
+            valid_timezones = set()
+        if valid_timezones and selected_tz not in valid_timezones:
+            flash("Invalid timezone selected.", "error")
             return redirect(url_for("settings.locations_index"))
 
-        except Exception as e:
-            flash(f"Failed to create shop: {e}", "error")
+        active_shop_doc = master.shops.find_one({"_id": active_shop_oid, "tenant_id": tenant["_id"]})
+        if not active_shop_doc:
+            flash("Active shop not found.", "error")
             return redirect(url_for("settings.locations_index"))
+
+        now = utcnow()
+        tenant_oid = tenant["_id"]
+        shop_oid = active_shop_doc["_id"]
+        tenant_variants = [tenant_oid, str(tenant_oid)]
+        shop_variants = [shop_oid, str(shop_oid)]
+
+        # Primary storage: master DB collection timezone_location
+        master.timezone_location.update_one(
+            {
+                "$or": [
+                    {"tenant_id": tv, "shop_id": sv}
+                    for tv in tenant_variants
+                    for sv in shop_variants
+                ]
+            },
+            {
+                "$set": {
+                    "shop_id": shop_oid,
+                    "tenant_id": tenant_oid,
+                    "timezone": selected_tz,
+                    "is_active": True,
+                    "updated_at": now,
+                    "updated_by": user.get("_id"),
+                },
+                "$setOnInsert": {
+                    "created_at": now,
+                    "created_by": user.get("_id"),
+                },
+            },
+            upsert=True,
+        )
+
+        # Backward compatibility: also mirror into shop DB when available.
+        db_name = (
+            active_shop_doc.get("db_name")
+            or active_shop_doc.get("database")
+            or active_shop_doc.get("db")
+            or active_shop_doc.get("mongo_db")
+            or active_shop_doc.get("shop_db")
+        )
+        if db_name:
+            shop_db = get_mongo_client()[str(db_name)]
+            shop_db.timezone_location.update_one(
+                {
+                    "$or": [
+                        {"shop_id": shop_oid},
+                        {"shop_id": str(shop_oid)},
+                        {"location_id": shop_oid},
+                        {"location_id": str(shop_oid)},
+                    ]
+                },
+                {
+                    "$set": {
+                        "shop_id": shop_oid,
+                        "tenant_id": tenant_oid,
+                        "timezone": selected_tz,
+                        "is_active": True,
+                        "updated_at": now,
+                        "updated_by": user.get("_id"),
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                        "created_by": user.get("_id"),
+                    },
+                },
+                upsert=True,
+            )
+
+        flash("Timezone updated for active shop.", "success")
+        return redirect(url_for("settings.locations_index"))
 
     # -----------------------------
     # List (GET)
@@ -521,9 +596,10 @@ def locations_index():
     allowed_shop_ids = [str(x) for x in allowed_shop_ids]
 
     shops = []
+    active_shop = None
     for s in master.shops.find({"tenant_id": tenant["_id"]}).sort("created_at", 1):
         sid = str(s["_id"])
-        shops.append({
+        item = {
             "_id": sid,
             "name": s.get("name"),
             "slug": s.get("slug"),
@@ -539,9 +615,93 @@ def locations_index():
             "is_active": bool(s.get("is_active", True)),
             "is_primary": False,  # primary = shop_ids[0], можно дорисовать позже
             "has_access": (sid in allowed_shop_ids),
-        })
+            "is_current": (sid == active_shop_raw),
+        }
+        shops.append(item)
+        if sid == active_shop_raw:
+            active_shop = s
 
-    return _render_settings_page("public/settings/locations.html", shops=shops)
+    current_timezone = "UTC"
+
+    def _extract_timezone_from_doc(doc):
+        if not isinstance(doc, dict):
+            return ""
+        value = (doc.get("timezone") or "").strip()
+        return value
+
+    if active_shop:
+        active_shop_oid = active_shop.get("_id")
+        active_shop_id_str = str(active_shop_oid)
+        tenant_oid = tenant["_id"]
+
+        # Primary read path: master DB timezone_location
+        tz_doc = master.timezone_location.find_one(
+            {
+                "is_active": {"$ne": False},
+                "$or": [
+                    {"tenant_id": tenant_oid, "shop_id": active_shop_oid},
+                    {"tenant_id": tenant_oid, "shop_id": active_shop_id_str},
+                    {"tenant_id": str(tenant_oid), "shop_id": active_shop_oid},
+                    {"tenant_id": str(tenant_oid), "shop_id": active_shop_id_str},
+                ],
+            },
+            {"timezone": 1, "updated_at": 1, "created_at": 1},
+            sort=[("updated_at", -1), ("created_at", -1)],
+        )
+
+        tz_value = _extract_timezone_from_doc(tz_doc)
+        if tz_value:
+            current_timezone = tz_value
+
+        db_name = (
+            active_shop.get("db_name")
+            or active_shop.get("database")
+            or active_shop.get("db")
+            or active_shop.get("mongo_db")
+            or active_shop.get("shop_db")
+        )
+        if db_name and not tz_value:
+            shop_db = get_mongo_client()[str(db_name)]
+
+            # Primary read path: timezone bound to active shop id.
+            tz_doc = shop_db.timezone_location.find_one(
+                {
+                    "is_active": {"$ne": False},
+                    "$or": [
+                        {"shop_id": active_shop.get("_id")},
+                        {"shop_id": active_shop_id_str},
+                        {"location_id": active_shop.get("_id")},
+                        {"location_id": active_shop_id_str},
+                    ],
+                },
+                {"timezone": 1, "updated_at": 1, "created_at": 1},
+                sort=[("updated_at", -1), ("created_at", -1)],
+            )
+
+            # Legacy fallback: some older records may not store shop_id/location_id.
+            if not tz_doc:
+                tz_doc = shop_db.timezone_location.find_one(
+                    {"is_active": {"$ne": False}},
+                    {"timezone": 1, "updated_at": 1, "created_at": 1},
+                    sort=[("updated_at", -1), ("created_at", -1)],
+                )
+
+            tz_value = _extract_timezone_from_doc(tz_doc)
+            if tz_value:
+                current_timezone = tz_value
+
+    timezone_options = sorted(set(COMMON_TIMEZONES))
+    if current_timezone and current_timezone not in timezone_options:
+        timezone_options.append(current_timezone)
+        timezone_options = sorted(set(timezone_options))
+
+    return _render_settings_page(
+        "public/settings/locations.html",
+        shops=shops,
+        active_shop_id=active_shop_raw,
+        current_timezone=current_timezone,
+        timezone_options=timezone_options,
+    )
 
 
 # -----------------------------
