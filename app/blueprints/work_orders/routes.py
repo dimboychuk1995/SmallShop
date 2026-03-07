@@ -411,11 +411,25 @@ def get_customers(shop_db):
             [("company_name", 1), ("last_name", 1), ("first_name", 1)]
         )
     )
+
+    rate_rows = list(
+        shop_db.labor_rates.find({"is_active": True}, {"_id": 1, "code": 1})
+    )
+    rates_by_id = {r.get("_id"): str(r.get("code") or "").strip() for r in rate_rows if r.get("_id")}
+
+    def resolve_customer_rate_code(value):
+        if isinstance(value, ObjectId):
+            return rates_by_id.get(value, "")
+        legacy = str(value or "").strip().lower()
+        if legacy == "standart":
+            return "standard"
+        return legacy
+
     return [
         {
             "id": str(x["_id"]),
             "label": customer_label(x),
-            "default_labor_rate": (x.get("default_labor_rate") or "").strip(),
+            "default_labor_rate": resolve_customer_rate_code(x.get("default_labor_rate")),
         }
         for x in rows
     ]

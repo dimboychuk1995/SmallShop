@@ -136,6 +136,22 @@ def get_context_ids(db):
     return shop_id, tenant_id, user_id
 
 
+def get_default_labor_rate_id(db, shop_id: ObjectId) -> ObjectId:
+    doc = db.labor_rates.find_one(
+        {"shop_id": shop_id, "is_active": True, "code": "standard"},
+        {"_id": 1},
+    )
+    if not doc:
+        doc = db.labor_rates.find_one(
+            {"shop_id": shop_id, "is_active": True},
+            {"_id": 1},
+            sort=[("name", 1)],
+        )
+    if not doc or not isinstance(doc.get("_id"), ObjectId):
+        raise RuntimeError("No active labor_rates found for this shop")
+    return doc["_id"]
+
+
 def random_phone() -> str:
     return f"{random.randint(200, 999)}-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
 
@@ -166,7 +182,7 @@ def slugify(value: str) -> str:
     return "".join(out).strip("-")
 
 
-def make_random_doc(*, existing_companies: set[str], shop_id: ObjectId, tenant_id: ObjectId, user_id: ObjectId) -> dict:
+def make_random_doc(*, existing_companies: set[str], shop_id: ObjectId, tenant_id: ObjectId, user_id: ObjectId, default_labor_rate_id: ObjectId) -> dict:
     company_name = random_company_name(existing_companies)
     first_name = random.choice(FIRST_NAMES)
     last_name = random.choice(LAST_NAMES)
@@ -181,7 +197,7 @@ def make_random_doc(*, existing_companies: set[str], shop_id: ObjectId, tenant_i
         "phone": random_phone(),
         "email": f"info@{domain}.com",
         "address": f"{random.randint(100, 9999)} {random.choice(STREETS)}",
-        "default_labor_rate": "Standart",
+        "default_labor_rate": default_labor_rate_id,
         "is_active": True,
         "created_at": now,
         "updated_at": now,
@@ -212,6 +228,7 @@ def main() -> None:
     db = client[db_name]
 
     shop_id, tenant_id, user_id = get_context_ids(db)
+    default_labor_rate_id = get_default_labor_rate_id(db, shop_id)
 
     existing_companies = {
         (x.get("company_name") or "").strip()
@@ -226,6 +243,7 @@ def main() -> None:
             shop_id=shop_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            default_labor_rate_id=default_labor_rate_id,
         )
         docs.append(doc)
         existing_companies.add(doc["company_name"])

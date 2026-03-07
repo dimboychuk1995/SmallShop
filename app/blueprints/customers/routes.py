@@ -47,6 +47,41 @@ def _customer_label(customer: dict) -> str:
     return full_name or "-"
 
 
+def _unit_label(unit: dict) -> str:
+    bits = []
+    if unit.get("unit_number"):
+        bits.append(str(unit.get("unit_number")))
+    if unit.get("year"):
+        bits.append(str(unit.get("year")))
+    if unit.get("make"):
+        bits.append(str(unit.get("make")))
+    if unit.get("model"):
+        bits.append(str(unit.get("model")))
+    if unit.get("vin"):
+        bits.append(f"VIN {unit.get('vin')}")
+    return " • ".join([x for x in bits if x]) or "-"
+
+
+def _get_labor_rates(shop_db, shop_id: ObjectId) -> list[dict]:
+    rows = list(
+        shop_db.labor_rates.find({"shop_id": shop_id, "is_active": True}).sort([("name", 1)])
+    )
+    out = []
+    for r in rows:
+        code = str(r.get("code") or "").strip()
+        if not code:
+            continue
+        out.append(
+            {
+                "id": str(r.get("_id")),
+                "code": code,
+                "name": str(r.get("name") or code).strip(),
+                "hourly_rate": _round2(r.get("hourly_rate")),
+            }
+        )
+    return out
+
+
 def _order_grand_total(order: dict) -> float:
     totals = order.get("totals") if isinstance(order.get("totals"), dict) else {}
     if totals.get("grand_total") is not None:
@@ -121,6 +156,46 @@ def _attach_customers_current_balances(customers: list[dict], shop_db, shop_id: 
 
     for customer in customers:
         customer["current_balance"] = _round2(balances_by_customer.get(customer.get("_id"), 0.0))
+
+
+def _customer_current_balance(shop_db, shop_id: ObjectId, customer_id: ObjectId) -> float:
+    query = {
+        "shop_id": shop_id,
+        "customer_id": customer_id,
+        "is_active": True,
+    }
+    all_orders = list(
+        shop_db.work_orders.find(
+            query,
+            {"_id": 1, "totals": 1, "grand_total": 1},
+        )
+    )
+    all_order_ids = [wo.get("_id") for wo in all_orders if wo.get("_id")]
+    all_paid_map = _build_paid_map(shop_db.work_order_payments, all_order_ids)
+
+    current_balance = 0.0
+    for wo in all_orders:
+        wo_id = wo.get("_id")
+        grand_total = _order_grand_total(wo)
+        paid_amount = _round2(all_paid_map.get(wo_id, 0.0))
+        remaining = _round2(grand_total - paid_amount)
+        if remaining > 0:
+            current_balance = _round2(current_balance + remaining)
+
+    return current_balance
+
+
+def _empty_pagination(page: int, per_page: int):
+    return {
+        "page": max(1, int(page or 1)),
+        "per_page": max(1, int(per_page or 20)),
+        "total": 0,
+        "pages": 1,
+        "has_prev": False,
+        "has_next": False,
+        "prev_page": 1,
+        "next_page": 1,
+    }
 
 
 def _oid(value):
@@ -213,6 +288,262 @@ def customers_page():
     )
 
 
+@customers_bp.get("/customers/<customer_id>")
+@login_required
+@permission_required("customers.view")
+def customer_details_page(customer_id):
+    coll, shop, master = _customers_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    cid = _oid(customer_id)
+    if not cid:
+        flash("Invalid customer id.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    customer = coll.find_one({"_id": cid, "shop_id": shop["_id"]})
+    if not customer:
+        flash("Customer not found.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    tab = (request.args.get("tab") or "work_orders").strip().lower()
+    allowed_tabs = {"work_orders", "units", "payments", "estimates", "details"}
+    if tab not in allowed_tabs:
+        tab = "work_orders"
+
+    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+    shop_db = coll.database
+    labor_rates = _get_labor_rates(shop_db, shop["_id"])
+    labor_rates_by_id = {x.get("id"): x for x in labor_rates if x.get("id")}
+    labor_rates_by_code = {x.get("code"): x for x in labor_rates if x.get("code")}
+
+    selected_rate = None
+    raw_default_rate = customer.get("default_labor_rate")
+    if isinstance(raw_default_rate, ObjectId):
+        selected_rate = labor_rates_by_id.get(str(raw_default_rate))
+    else:
+        # Backward compatibility for legacy string values stored before migration.
+        legacy_code = str(raw_default_rate or "").strip().lower()
+        if legacy_code == "standart":
+            legacy_code = "standard"
+        selected_rate = labor_rates_by_code.get(legacy_code)
+
+    selected_rate_name = (selected_rate or {}).get("name") or "-"
+    selected_rate_id = (selected_rate or {}).get("id") or ""
+
+    customer_view = {
+        "id": str(customer.get("_id")),
+        "label": _customer_label(customer),
+        "company_name": customer.get("company_name") or "",
+        "first_name": customer.get("first_name") or "",
+        "last_name": customer.get("last_name") or "",
+        "phone": customer.get("phone") or "",
+        "email": customer.get("email") or "",
+        "address": customer.get("address") or "",
+        "default_labor_rate": str(customer.get("default_labor_rate")) if isinstance(customer.get("default_labor_rate"), ObjectId) else "",
+        "default_labor_rate_id": selected_rate_id,
+        "is_active": customer.get("is_active", True),
+        "created_at": _fmt_dt_label(customer.get("created_at")),
+        "updated_at": _fmt_dt_label(customer.get("updated_at")),
+        "current_balance": _customer_current_balance(shop_db, shop["_id"], cid),
+        "default_labor_rate_name": selected_rate_name,
+    }
+
+    tab_items = []
+    tab_pagination = None
+
+    if tab == "work_orders":
+        wo_query = {
+            "shop_id": shop["_id"],
+            "customer_id": cid,
+            "is_active": True,
+        }
+        work_orders, tab_pagination = paginate_find(
+            shop_db.work_orders,
+            wo_query,
+            [("created_at", -1)],
+            page,
+            per_page,
+            projection={
+                "wo_number": 1,
+                "status": 1,
+                "created_at": 1,
+                "totals": 1,
+                "grand_total": 1,
+                "unit_id": 1,
+            },
+        )
+        page_wo_ids = [wo.get("_id") for wo in work_orders if wo.get("_id")]
+        paid_map = _build_paid_map(shop_db.work_order_payments, page_wo_ids)
+
+        unit_ids = [wo.get("unit_id") for wo in work_orders if wo.get("unit_id")]
+        units_map = {}
+        if unit_ids:
+            for unit in shop_db.units.find({"_id": {"$in": unit_ids}}):
+                units_map[unit.get("_id")] = _unit_label(unit)
+
+        for wo in work_orders:
+            wo_id = wo.get("_id")
+            grand_total = _order_grand_total(wo)
+            paid_amount = _round2(paid_map.get(wo_id, 0.0))
+            remaining = _round2(grand_total - paid_amount)
+            if remaining < 0:
+                remaining = 0.0
+            tab_items.append(
+                {
+                    "id": str(wo_id),
+                    "wo_number": wo.get("wo_number") or "-",
+                    "status": (wo.get("status") or "open").strip().lower(),
+                    "created_at": _fmt_dt_label(wo.get("created_at")),
+                    "unit": units_map.get(wo.get("unit_id")) or "-",
+                    "grand_total": grand_total,
+                    "paid_amount": paid_amount,
+                    "remaining_balance": remaining,
+                }
+            )
+
+    elif tab == "units":
+        units, tab_pagination = paginate_find(
+            shop_db.units,
+            {
+                "shop_id": shop["_id"],
+                "customer_id": cid,
+                "is_active": True,
+            },
+            [("created_at", -1)],
+            page,
+            per_page,
+            projection={
+                "unit_number": 1,
+                "year": 1,
+                "make": 1,
+                "model": 1,
+                "vin": 1,
+                "mileage": 1,
+                "created_at": 1,
+            },
+        )
+
+        for u in units:
+            tab_items.append(
+                {
+                    "id": str(u.get("_id")),
+                    "unit_number": u.get("unit_number") or "-",
+                    "label": _unit_label(u),
+                    "vin": u.get("vin") or "-",
+                    "mileage": u.get("mileage") if u.get("mileage") is not None else "-",
+                    "created_at": _fmt_dt_label(u.get("created_at")),
+                }
+            )
+
+    elif tab == "payments":
+        wo_rows = list(
+            shop_db.work_orders.find(
+                {
+                    "shop_id": shop["_id"],
+                    "customer_id": cid,
+                    "is_active": True,
+                },
+                {"_id": 1, "wo_number": 1},
+            )
+        )
+
+        wo_ids = [wo.get("_id") for wo in wo_rows if wo.get("_id")]
+        wo_map = {wo.get("_id"): wo.get("wo_number") for wo in wo_rows if wo.get("_id")}
+
+        if wo_ids:
+            payments, tab_pagination = paginate_find(
+                shop_db.work_order_payments,
+                {
+                    "shop_id": shop["_id"],
+                    "work_order_id": {"$in": wo_ids},
+                    "is_active": True,
+                },
+                [("created_at", -1)],
+                page,
+                per_page,
+                projection={
+                    "work_order_id": 1,
+                    "amount": 1,
+                    "payment_method": 1,
+                    "notes": 1,
+                    "created_at": 1,
+                },
+            )
+
+            for p in payments:
+                tab_items.append(
+                    {
+                        "id": str(p.get("_id")),
+                        "work_order_id": str(p.get("work_order_id")) if p.get("work_order_id") else "",
+                        "wo_number": wo_map.get(p.get("work_order_id")) or "-",
+                        "amount": _round2(p.get("amount")),
+                        "payment_method": (p.get("payment_method") or "cash").replace("_", " "),
+                        "notes": p.get("notes") or "",
+                        "created_at": _fmt_dt_label(p.get("created_at")),
+                    }
+                )
+        else:
+            tab_pagination = _empty_pagination(page, per_page)
+
+    elif tab == "estimates":
+        estimate_statuses = ["estimate", "estimated", "quote", "quoted"]
+        estimate_query = {
+            "shop_id": shop["_id"],
+            "customer_id": cid,
+            "is_active": True,
+            "status": {"$in": estimate_statuses},
+        }
+        estimates, tab_pagination = paginate_find(
+            shop_db.work_orders,
+            estimate_query,
+            [("created_at", -1)],
+            page,
+            per_page,
+            projection={
+                "wo_number": 1,
+                "status": 1,
+                "created_at": 1,
+                "totals": 1,
+                "grand_total": 1,
+                "unit_id": 1,
+            },
+        )
+
+        unit_ids = [wo.get("unit_id") for wo in estimates if wo.get("unit_id")]
+        units_map = {}
+        if unit_ids:
+            for unit in shop_db.units.find({"_id": {"$in": unit_ids}}):
+                units_map[unit.get("_id")] = _unit_label(unit)
+
+        for wo in estimates:
+            tab_items.append(
+                {
+                    "id": str(wo.get("_id")),
+                    "wo_number": wo.get("wo_number") or "-",
+                    "status": (wo.get("status") or "estimate").strip().lower(),
+                    "created_at": _fmt_dt_label(wo.get("created_at")),
+                    "unit": units_map.get(wo.get("unit_id")) or "-",
+                    "grand_total": _order_grand_total(wo),
+                }
+            )
+
+    else:
+        tab_pagination = _empty_pagination(page, per_page)
+
+    return _render_app_page(
+        "public/customers/customer_details.html",
+        active_page="customers",
+        customer=customer_view,
+        customer_id=str(cid),
+        active_tab=tab,
+        tab_items=tab_items,
+        pagination=tab_pagination,
+        labor_rates=labor_rates,
+    )
+
+
 @customers_bp.post("/customers/create")
 @login_required
 @permission_required("customers.edit")
@@ -243,6 +574,17 @@ def customers_create():
     now = utcnow()
     user_oid = _oid(session.get(SESSION_USER_ID))
 
+    default_rate_doc = coll.database.labor_rates.find_one(
+        {"shop_id": shop["_id"], "is_active": True, "code": "standard"},
+        {"_id": 1},
+    )
+    if not default_rate_doc:
+        default_rate_doc = coll.database.labor_rates.find_one(
+            {"shop_id": shop["_id"], "is_active": True},
+            {"_id": 1},
+            sort=[("name", 1)],
+        )
+
     doc = {
         "company_name": company_name or None,
         "first_name": first_name or None,
@@ -250,7 +592,7 @@ def customers_create():
         "phone": phone or None,
         "email": email or None,
         "address": address or None,
-        "default_labor_rate": "Standart",
+        "default_labor_rate": default_rate_doc.get("_id") if default_rate_doc else None,
 
         "is_active": True,
 
@@ -311,6 +653,72 @@ def customers_deactivate(customer_id):
 
     flash("Customer deactivated.", "success")
     return redirect(url_for("customers.customers_page"))
+
+
+@customers_bp.post("/customers/<customer_id>/update")
+@login_required
+@permission_required("customers.edit")
+def customer_details_update(customer_id):
+    coll, shop, master = _customers_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    cid = _oid(customer_id)
+    if not cid:
+        flash("Invalid customer id.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    customer = coll.find_one({"_id": cid, "shop_id": shop["_id"]})
+    if not customer:
+        flash("Customer not found.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    company_name = (request.form.get("company_name") or "").strip()
+    first_name = (request.form.get("first_name") or "").strip()
+    last_name = (request.form.get("last_name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    address = (request.form.get("address") or "").strip()
+    default_labor_rate_id = _oid(request.form.get("default_labor_rate"))
+    if request.form.get("default_labor_rate") and not default_labor_rate_id:
+        flash("Selected default labor rate is invalid.", "error")
+        return redirect(url_for("customers.customer_details_page", customer_id=str(cid), tab="details"))
+
+    if default_labor_rate_id:
+        rate_exists = coll.database.labor_rates.count_documents(
+            {"_id": default_labor_rate_id, "shop_id": shop["_id"], "is_active": True}
+        )
+        if rate_exists == 0:
+            flash("Selected default labor rate is invalid.", "error")
+            return redirect(url_for("customers.customer_details_page", customer_id=str(cid), tab="details"))
+
+    if not company_name and not (first_name and last_name):
+        flash("Company name or First+Last name is required.", "error")
+        return redirect(url_for("customers.customer_details_page", customer_id=str(cid), tab="details"))
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    coll.update_one(
+        {"_id": cid},
+        {
+            "$set": {
+                "company_name": company_name or None,
+                "first_name": first_name or None,
+                "last_name": last_name or None,
+                "phone": phone or None,
+                "email": email or None,
+                "address": address or None,
+                "default_labor_rate": default_labor_rate_id,
+                "updated_at": now,
+                "updated_by": user_oid,
+            }
+        },
+    )
+
+    flash("Customer updated successfully.", "success")
+    return redirect(url_for("customers.customer_details_page", customer_id=str(cid), tab="details"))
 
 
 @customers_bp.get("/customers/api/<customer_id>")
@@ -433,100 +841,3 @@ def customers_api_deactivate(customer_id):
     return jsonify({"ok": True, "message": "Customer deactivated"})
 
 
-@customers_bp.get("/customers/api/<customer_id>/work-orders")
-@login_required
-@permission_required("customers.view")
-def customers_api_work_orders(customer_id):
-    coll, shop, master = _customers_collection()
-    if coll is None or shop is None:
-        return jsonify({"ok": False, "error": "Shop not configured"}), 400
-
-    cid = _oid(customer_id)
-    if not cid:
-        return jsonify({"ok": False, "error": "Invalid customer id"}), 400
-
-    customer = coll.find_one({"_id": cid, "shop_id": shop["_id"]})
-    if not customer:
-        return jsonify({"ok": False, "error": "Customer not found"}), 404
-
-    shop_db = coll.database
-    work_orders_coll = shop_db.work_orders
-    payments_coll = shop_db.work_order_payments
-
-    page, per_page = get_pagination_params(request.args, default_per_page=10, max_per_page=100)
-    wo_query = {
-        "shop_id": shop["_id"],
-        "customer_id": cid,
-        "is_active": True,
-    }
-
-    work_orders, pagination = paginate_find(
-        work_orders_coll,
-        wo_query,
-        [("created_at", -1)],
-        page,
-        per_page,
-        projection={
-            "wo_number": 1,
-            "status": 1,
-            "created_at": 1,
-            "totals": 1,
-            "grand_total": 1,
-        },
-    )
-
-    page_wo_ids = [wo.get("_id") for wo in work_orders if wo.get("_id")]
-    paid_map = _build_paid_map(payments_coll, page_wo_ids)
-
-    items = []
-    for wo in work_orders:
-        wo_id = wo.get("_id")
-        grand_total = _order_grand_total(wo)
-        paid_amount = _round2(paid_map.get(wo_id, 0.0))
-        remaining = _round2(grand_total - paid_amount)
-        if remaining < 0:
-            remaining = 0.0
-
-        items.append(
-            {
-                "id": str(wo_id),
-                "wo_number": wo.get("wo_number") or "-",
-                "status": (wo.get("status") or "open").strip().lower(),
-                "created_at": _fmt_dt_label(wo.get("created_at")),
-                "grand_total": grand_total,
-                "paid_amount": paid_amount,
-                "remaining_balance": remaining,
-            }
-        )
-
-    # Current customer balance over all active work orders.
-    all_orders = list(
-        work_orders_coll.find(
-            wo_query,
-            {"_id": 1, "totals": 1, "grand_total": 1},
-        )
-    )
-    all_order_ids = [wo.get("_id") for wo in all_orders if wo.get("_id")]
-    all_paid_map = _build_paid_map(payments_coll, all_order_ids)
-
-    current_balance = 0.0
-    for wo in all_orders:
-        wo_id = wo.get("_id")
-        grand_total = _order_grand_total(wo)
-        paid_amount = _round2(all_paid_map.get(wo_id, 0.0))
-        remaining = _round2(grand_total - paid_amount)
-        if remaining > 0:
-            current_balance = _round2(current_balance + remaining)
-
-    return jsonify(
-        {
-            "ok": True,
-            "customer": {
-                "id": str(customer.get("_id")),
-                "name": _customer_label(customer),
-                "current_balance": current_balance,
-            },
-            "items": items,
-            "pagination": pagination,
-        }
-    )
