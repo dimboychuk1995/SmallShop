@@ -47,7 +47,14 @@
           <div class="col-12 col-md-8 col-lg-6">
             <input type="text" name="q" class="form-control form-control-sm" placeholder="Search work orders by any field..." value="{{ q or '' }}" />
           </div>
-          {% if q %}
+          <div class="col-12 col-md-4 col-lg-3">
+            <select name="paid_status" class="form-select form-select-sm" aria-label="Paid status filter">
+              <option value="all" {% if (paid_status or 'all') == 'all' %}selected{% endif %}>All</option>
+              <option value="paid" {% if paid_status == 'paid' %}selected{% endif %}>Paid</option>
+              <option value="unpaid" {% if paid_status == 'unpaid' %}selected{% endif %}>Unpaid</option>
+            </select>
+          </div>
+          {% if q or (paid_status and paid_status != 'all') %}
             <div class="col-auto">
               <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('work_orders.work_orders_page') }}">Reset</a>
             </div>
@@ -113,9 +120,9 @@
               </div>
               <div class="btn-group btn-group-sm" role="group" aria-label="Work orders pagination">
                 <a class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
-                   href="{{ url_for('work_orders.work_orders_page', page=pagination.prev_page, per_page=pagination.per_page, q=q) }}">Prev</a>
+                   href="{{ url_for('work_orders.work_orders_page', page=pagination.prev_page, per_page=pagination.per_page, q=q, paid_status=paid_status) }}">Prev</a>
                 <a class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
-                   href="{{ url_for('work_orders.work_orders_page', page=pagination.next_page, per_page=pagination.per_page, q=q) }}">Next</a>
+                   href="{{ url_for('work_orders.work_orders_page', page=pagination.next_page, per_page=pagination.per_page, q=q, paid_status=paid_status) }}">Next</a>
               </div>
             </div>
           {% endif %}

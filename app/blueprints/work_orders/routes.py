@@ -292,8 +292,20 @@ def format_dt_label(dt):
     return "-"
 
 
-def get_work_orders_list(shop_db, shop_id: ObjectId, page: int, per_page: int, q: str = ""):
+def get_work_orders_list(
+    shop_db,
+    shop_id: ObjectId,
+    page: int,
+    per_page: int,
+    q: str = "",
+    paid_status: str = "all",
+):
     query = {"shop_id": shop_id, "is_active": True}
+
+    if paid_status == "paid":
+        query["status"] = "paid"
+    elif paid_status == "unpaid":
+        query["status"] = {"$ne": "paid"}
 
     search_filter = build_regex_search_filter(
         q,
@@ -1007,14 +1019,26 @@ def work_orders_page():
         return redirect(url_for("main.dashboard"))
 
     q = (request.args.get("q") or "").strip()
+    paid_status = (request.args.get("paid_status") or "all").strip().lower()
+    if paid_status not in ("all", "paid", "unpaid"):
+        paid_status = "all"
+
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
-    work_orders, pagination = get_work_orders_list(shop_db, shop["_id"], page, per_page, q=q)
+    work_orders, pagination = get_work_orders_list(
+        shop_db,
+        shop["_id"],
+        page,
+        per_page,
+        q=q,
+        paid_status=paid_status,
+    )
     return _render_app_page(
         "public/work_orders/work_orders.html",
         active_page="work_orders",
         work_orders=work_orders,
         pagination=pagination,
         q=q,
+        paid_status=paid_status,
     )
 
 

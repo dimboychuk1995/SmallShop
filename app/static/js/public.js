@@ -104,6 +104,11 @@
 		return url;
 	}
 
+	function buildFormSignature(form, input) {
+		var url = buildSearchUrl(form, input);
+		return url.pathname + "?" + url.searchParams.toString();
+	}
+
 	function replaceMainContent(html) {
 		var parser = new DOMParser();
 		var doc = parser.parseFromString(html, "text/html");
@@ -178,14 +183,14 @@
 		form.dataset.autoSearchBound = "1";
 		var delayMs = 450;
 		var timer = null;
-		var lastSubmittedValue = (input.value || "").trim();
+		var lastSubmittedSignature = buildFormSignature(form, input);
 
 		function submitIfChanged() {
-			var value = (input.value || "").trim();
-			if (value === lastSubmittedValue) {
+			var nextSignature = buildFormSignature(form, input);
+			if (nextSignature === lastSubmittedSignature) {
 				return;
 			}
-			lastSubmittedValue = value;
+			lastSubmittedSignature = nextSignature;
 			runSearch(form, input);
 		}
 
@@ -211,6 +216,17 @@
 			event.preventDefault();
 			if (timer) {
 				window.clearTimeout(timer);
+			}
+			submitIfChanged();
+		});
+
+		form.addEventListener("change", function (event) {
+			var target = event && event.target;
+			if (!target || !target.name) {
+				return;
+			}
+			if (target.name === "q") {
+				return;
 			}
 			submitIfChanged();
 		});

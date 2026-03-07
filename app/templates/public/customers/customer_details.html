@@ -343,39 +343,5 @@
   </div>
 </div>
 
-{% if active_tab == 'units' %}
-<script>
-  (function() {
-    function shouldIgnoreClick(target) {
-      return !!target.closest('a, button, form, input, select, textarea, label');
-    }
-
-    document.addEventListener('click', function(e) {
-      const row = e.target.closest('.js-unit-row');
-      if (!row || shouldIgnoreClick(e.target)) {
-        return;
-      }
-      const href = row.getAttribute('data-href');
-      if (href) {
-        window.location.href = href;
-      }
-    });
-
-    document.addEventListener('keydown', function(e) {
-      const row = e.target.closest('.js-unit-row');
-      if (!row || shouldIgnoreClick(e.target)) {
-        return;
-      }
-      if (e.key !== 'Enter' && e.key !== ' ') {
-        return;
-      }
-      e.preventDefault();
-      const href = row.getAttribute('data-href');
-      if (href) {
-        window.location.href = href;
-      }
-    });
-  })();
-</script>
-{% endif %}
+<script src="{{ url_for('static', filename='js/customers/customers.js', v='20260307-customers-js') }}"></script>
 {% endblock %}
