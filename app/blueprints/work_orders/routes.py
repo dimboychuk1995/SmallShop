@@ -9,6 +9,7 @@ from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
 from app.utils.pagination import get_pagination_params, paginate_find
+from app.utils.mongo_search import build_regex_search_filter
 from app.utils.parts_search import build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
 
@@ -291,10 +292,70 @@ def format_dt_label(dt):
     return "-"
 
 
-def get_work_orders_list(shop_db, shop_id: ObjectId, page: int, per_page: int):
+def get_work_orders_list(shop_db, shop_id: ObjectId, page: int, per_page: int, q: str = ""):
+    query = {"shop_id": shop_id, "is_active": True}
+
+    search_filter = build_regex_search_filter(
+        q,
+        text_fields=["status"],
+        numeric_fields=["wo_number", "grand_total", "totals.grand_total", "totals.parts_total", "totals.labor_total"],
+        object_id_fields=["_id", "customer_id", "unit_id", "shop_id", "tenant_id"],
+    )
+
+    if q:
+        customer_ids = [
+            c.get("_id")
+            for c in shop_db.customers.find(
+                {
+                    "$or": [
+                        {"company_name": {"$regex": q, "$options": "i"}},
+                        {"first_name": {"$regex": q, "$options": "i"}},
+                        {"last_name": {"$regex": q, "$options": "i"}},
+                        {"phone": {"$regex": q, "$options": "i"}},
+                        {"email": {"$regex": q, "$options": "i"}},
+                        {"address": {"$regex": q, "$options": "i"}},
+                    ]
+                },
+                {"_id": 1},
+            )
+            if c.get("_id")
+        ]
+
+        unit_ids = [
+            u.get("_id")
+            for u in shop_db.units.find(
+                {
+                    "$or": [
+                        {"unit_number": {"$regex": q, "$options": "i"}},
+                        {"vin": {"$regex": q, "$options": "i"}},
+                        {"make": {"$regex": q, "$options": "i"}},
+                        {"model": {"$regex": q, "$options": "i"}},
+                        {"type": {"$regex": q, "$options": "i"}},
+                    ]
+                },
+                {"_id": 1},
+            )
+            if u.get("_id")
+        ]
+
+        extra = []
+        if customer_ids:
+            extra.append({"customer_id": {"$in": customer_ids}})
+        if unit_ids:
+            extra.append({"unit_id": {"$in": unit_ids}})
+
+        if search_filter and extra:
+            query = {"$and": [query, {"$or": [search_filter, *extra]}]}
+        elif search_filter:
+            query = {"$and": [query, search_filter]}
+        elif extra:
+            query = {"$and": [query, {"$or": extra}]}
+    elif search_filter:
+        query = {"$and": [query, search_filter]}
+
     rows, pagination = paginate_find(
         shop_db.work_orders,
-        {"shop_id": shop_id, "is_active": True},
+        query,
         [("created_at", -1)],
         page,
         per_page,
@@ -945,13 +1006,15 @@ def work_orders_page():
         flash("Shop database not configured.", "error")
         return redirect(url_for("main.dashboard"))
 
+    q = (request.args.get("q") or "").strip()
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
-    work_orders, pagination = get_work_orders_list(shop_db, shop["_id"], page, per_page)
+    work_orders, pagination = get_work_orders_list(shop_db, shop["_id"], page, per_page, q=q)
     return _render_app_page(
         "public/work_orders/work_orders.html",
         active_page="work_orders",
         work_orders=work_orders,
         pagination=pagination,
+        q=q,
     )
 
 
@@ -1706,9 +1769,66 @@ def api_get_all_payments():
         return jsonify({"ok": False, "error": "shop_db_missing"}), 200
 
     shop_id = shop["_id"]
+    q = (request.args.get("q") or "").strip()
+
+    payments_query = {"shop_id": shop_id, "is_active": True}
+
+    payments_search = build_regex_search_filter(
+        q,
+        text_fields=["payment_method", "notes"],
+        numeric_fields=["amount"],
+        object_id_fields=["_id", "work_order_id", "shop_id", "created_by"],
+    )
+
+    if q:
+        customer_ids = [
+            c.get("_id")
+            for c in shop_db.customers.find(
+                {
+                    "$or": [
+                        {"company_name": {"$regex": q, "$options": "i"}},
+                        {"first_name": {"$regex": q, "$options": "i"}},
+                        {"last_name": {"$regex": q, "$options": "i"}},
+                    ]
+                },
+                {"_id": 1},
+            )
+            if c.get("_id")
+        ]
+
+        wo_base = {"shop_id": shop_id}
+        wo_search = build_regex_search_filter(
+            q,
+            text_fields=["status"],
+            numeric_fields=["wo_number"],
+            object_id_fields=["_id", "customer_id", "unit_id", "shop_id"],
+        )
+        if customer_ids and wo_search:
+            wo_query = {"$and": [wo_base, {"$or": [wo_search, {"customer_id": {"$in": customer_ids}}]}]}
+        elif customer_ids:
+            wo_query = {"$and": [wo_base, {"customer_id": {"$in": customer_ids}}]}
+        elif wo_search:
+            wo_query = {"$and": [wo_base, wo_search]}
+        else:
+            wo_query = wo_base
+
+        wo_ids = [wo.get("_id") for wo in shop_db.work_orders.find(wo_query, {"_id": 1}) if wo.get("_id")]
+
+        extra = []
+        if wo_ids:
+            extra.append({"work_order_id": {"$in": wo_ids}})
+
+        if payments_search and extra:
+            payments_query = {"$and": [payments_query, {"$or": [payments_search, *extra]}]}
+        elif payments_search:
+            payments_query = {"$and": [payments_query, payments_search]}
+        elif extra:
+            payments_query = {"$and": [payments_query, {"$or": extra}]}
+    elif payments_search:
+        payments_query = {"$and": [payments_query, payments_search]}
 
     payments = list(
-        shop_db.work_order_payments.find({"shop_id": shop_id, "is_active": True})
+        shop_db.work_order_payments.find(payments_query)
         .sort([("created_at", -1)])
         .limit(500)
     )

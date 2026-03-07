@@ -90,7 +90,9 @@
     }
   });
 
-  document.getElementById("paymentListSubmitBtn")?.addEventListener("click", async function () {
+  document.addEventListener("click", async function (e) {
+    const submitBtn = e.target.closest("#paymentListSubmitBtn");
+    if (!submitBtn) return;
     if (!currentWorkOrderId) return;
 
     const amount = parseFloat(document.getElementById("paymentListAmountInput").value || "0");
@@ -102,7 +104,7 @@
       return;
     }
 
-    const btn = this;
+    const btn = submitBtn;
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = "Saving...";
@@ -156,7 +158,13 @@
     emptyEl.classList.add("d-none");
 
     try {
-      const response = await fetch("/work_orders/api/work_orders/all-payments", {
+      const params = new URLSearchParams(window.location.search || "");
+      const q = String(params.get("q") || "").trim();
+      const endpoint = q
+        ? `/work_orders/api/work_orders/all-payments?q=${encodeURIComponent(q)}`
+        : "/work_orders/api/work_orders/all-payments";
+
+      const response = await fetch(endpoint, {
         method: "GET",
         headers: { "Accept": "application/json" },
       });
@@ -248,14 +256,12 @@
   }
 
   // Listen for Payments tab activation
-  const paymentsTab = document.getElementById("tab-payments");
-  if (paymentsTab) {
-    paymentsTab.addEventListener("shown.bs.tab", function () {
-      if (!paymentsLoaded) {
-        loadPaymentsData();
-      }
-    });
-  }
+  document.addEventListener("shown.bs.tab", function (event) {
+    if (event?.target?.id !== "tab-payments") return;
+    if (!paymentsLoaded) {
+      loadPaymentsData();
+    }
+  });
 
   // ========== TAB PERSISTENCE LOGIC ==========
   const workOrdersTabIds = ["tab-work-orders", "tab-payments", "tab-estimates"];
@@ -346,5 +352,9 @@
   });
 
   window.addEventListener("load", restoreSavedTab);
+  window.addEventListener("smallshop:content-replaced", function () {
+    paymentsLoaded = false;
+    restoreSavedTab();
+  });
 
 })();

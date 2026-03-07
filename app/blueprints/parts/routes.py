@@ -10,6 +10,7 @@ from app.blueprints.main.routes import _render_app_page
 from app.extensions import get_master_db, get_mongo_client
 from app.utils.auth import login_required, SESSION_TENANT_ID, SESSION_USER_ID
 from app.utils.pagination import get_pagination_params, paginate_find
+from app.utils.mongo_search import build_regex_search_filter
 from app.utils.parts_search import build_parts_search_terms, build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
 
@@ -212,15 +213,83 @@ def parts_page():
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("main.dashboard"))
 
-    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+    active_tab = (request.args.get("tab") or "parts").strip().lower()
+    if active_tab not in {"parts", "orders"}:
+        active_tab = "parts"
+
+    q = (request.args.get("q") or "").strip()
+
+    parts_page_num, parts_per_page = get_pagination_params(
+        request.args,
+        default_per_page=20,
+        max_per_page=100,
+        page_key="parts_page",
+        per_page_key="parts_per_page",
+    )
+    orders_page_num, orders_per_page = get_pagination_params(
+        request.args,
+        default_per_page=20,
+        max_per_page=100,
+        page_key="orders_page",
+        per_page_key="orders_per_page",
+    )
+
+    vendor_ids_by_name = []
+    if q and vendors_coll is not None:
+        name_query = {
+            "$or": [
+                {"name": {"$regex": q, "$options": "i"}},
+                {"company_name": {"$regex": q, "$options": "i"}},
+            ]
+        }
+        vendor_ids_by_name = [x.get("_id") for x in vendors_coll.find(name_query, {"_id": 1}) if x.get("_id")]
+
+    category_ids_by_name = []
+    if q and cats_coll is not None:
+        category_ids_by_name = [
+            x.get("_id")
+            for x in cats_coll.find({"name": {"$regex": q, "$options": "i"}}, {"_id": 1})
+            if x.get("_id")
+        ]
+
+    location_ids_by_name = []
+    if q and locs_coll is not None:
+        location_ids_by_name = [
+            x.get("_id")
+            for x in locs_coll.find({"name": {"$regex": q, "$options": "i"}}, {"_id": 1})
+            if x.get("_id")
+        ]
+
+    parts_query = {"is_active": True, "in_stock": {"$gt": 0}}
+    parts_search_filter = build_regex_search_filter(
+        q,
+        text_fields=["part_number", "description", "reference", "search_terms"],
+        numeric_fields=["in_stock", "average_cost"],
+        object_id_fields=["_id", "vendor_id", "category_id", "location_id", "shop_id", "tenant_id"],
+    )
+    if q:
+        extra = []
+        if vendor_ids_by_name:
+            extra.append({"vendor_id": {"$in": vendor_ids_by_name}})
+        if category_ids_by_name:
+            extra.append({"category_id": {"$in": category_ids_by_name}})
+        if location_ids_by_name:
+            extra.append({"location_id": {"$in": location_ids_by_name}})
+
+        if parts_search_filter and extra:
+            parts_query = {"$and": [parts_query, {"$or": [parts_search_filter, *extra]}]}
+        elif parts_search_filter:
+            parts_query = {"$and": [parts_query, parts_search_filter]}
+        elif extra:
+            parts_query = {"$and": [parts_query, {"$or": extra}]}
 
     # 1) Parts in stock
     parts_in_stock, pagination = paginate_find(
         parts_coll,
-        {"is_active": True, "in_stock": {"$gt": 0}},
+        parts_query,
         [("part_number", 1), ("description", 1), ("created_at", -1)],
-        page,
-        per_page,
+        parts_page_num,
+        parts_per_page,
     )
 
     # 2) Reference lists for modal selects
@@ -267,11 +336,34 @@ def parts_page():
 
     # Get orders list for Orders tab
     orders_list = []
+    orders_pagination = None
     if orders_coll is not None:
-        orders_rows = list(
-            orders_coll.find({"shop_id": shop["_id"], "is_active": {"$ne": False}})
-            .sort([("created_at", -1)])
-            .limit(100)
+        orders_query = {"shop_id": shop["_id"], "is_active": {"$ne": False}}
+        orders_search_filter = build_regex_search_filter(
+            q,
+            text_fields=["status"],
+            numeric_fields=["order_number"],
+            object_id_fields=["_id", "vendor_id", "shop_id", "tenant_id", "created_by", "updated_by"],
+        )
+        if q and vendor_ids_by_name:
+            if orders_search_filter:
+                orders_query = {
+                    "$and": [
+                        orders_query,
+                        {"$or": [orders_search_filter, {"vendor_id": {"$in": vendor_ids_by_name}}]},
+                    ]
+                }
+            else:
+                orders_query = {"$and": [orders_query, {"vendor_id": {"$in": vendor_ids_by_name}}]}
+        elif orders_search_filter:
+            orders_query = {"$and": [orders_query, orders_search_filter]}
+
+        orders_rows, orders_pagination = paginate_find(
+            orders_coll,
+            orders_query,
+            [("created_at", -1)],
+            orders_page_num,
+            orders_per_page,
         )
         
         # Get vendor names for orders
@@ -294,8 +386,11 @@ def parts_page():
     return _render_app_page(
         "public/parts.html",
         active_page="parts",
+        active_tab=active_tab,
+        q=q,
         parts=parts_in_stock,
         pagination=pagination,
+        orders_pagination=orders_pagination,
         vendors=vendors,
         categories=categories,
         locations=locations,

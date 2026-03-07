@@ -43,6 +43,17 @@
   <div class="tab-pane fade show active" id="content-work-orders" role="tabpanel" aria-labelledby="tab-work-orders">
     <div class="card">
       <div class="card-body">
+        <form method="get" class="row g-2 align-items-center mb-3">
+          <div class="col-12 col-md-8 col-lg-6">
+            <input type="text" name="q" class="form-control form-control-sm" placeholder="Search work orders by any field..." value="{{ q or '' }}" />
+          </div>
+          {% if q %}
+            <div class="col-auto">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('work_orders.work_orders_page') }}">Reset</a>
+            </div>
+          {% endif %}
+        </form>
+
         {% if work_orders and work_orders|length > 0 %}
           <div class="table-responsive">
             <table class="table table-sm align-middle">
@@ -85,7 +96,7 @@
                       {% endif %}
                     </td>
                     <td class="text-end">
-                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('work_orders.work_order_details_page', work_order_id=w.id) }}">
+                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('work_orders.work_order_details_page', work_order_id=w.id) }}" target="_blank" rel="noopener noreferrer">
                         Edit
                       </a>
                     </td>
@@ -102,9 +113,9 @@
               </div>
               <div class="btn-group btn-group-sm" role="group" aria-label="Work orders pagination">
                 <a class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
-                   href="{{ url_for('work_orders.work_orders_page', page=pagination.prev_page, per_page=pagination.per_page) }}">Prev</a>
+                   href="{{ url_for('work_orders.work_orders_page', page=pagination.prev_page, per_page=pagination.per_page, q=q) }}">Prev</a>
                 <a class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
-                   href="{{ url_for('work_orders.work_orders_page', page=pagination.next_page, per_page=pagination.per_page) }}">Next</a>
+                   href="{{ url_for('work_orders.work_orders_page', page=pagination.next_page, per_page=pagination.per_page, q=q) }}">Next</a>
               </div>
             </div>
           {% endif %}
@@ -119,6 +130,17 @@
   <div class="tab-pane fade" id="content-payments" role="tabpanel" aria-labelledby="tab-payments">
     <div class="card">
       <div class="card-body">
+        <form method="get" class="row g-2 align-items-center mb-3">
+          <div class="col-12 col-md-8 col-lg-6">
+            <input type="text" name="q" class="form-control form-control-sm" placeholder="Search payments by any field..." value="{{ q or '' }}" />
+          </div>
+          {% if q %}
+            <div class="col-auto">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('work_orders.work_orders_page') }}">Reset</a>
+            </div>
+          {% endif %}
+        </form>
+
         <div id="payments-loading" class="text-muted d-none">
           <div class="spinner-border spinner-border-sm me-2" role="status" style="width: 1rem; height: 1rem;"></div>
           Loading payments...

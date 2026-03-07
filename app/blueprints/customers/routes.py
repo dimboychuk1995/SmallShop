@@ -14,6 +14,7 @@ from app.utils.auth import (
     SESSION_USER_ID,
 )
 from app.utils.pagination import get_pagination_params, paginate_find
+from app.utils.mongo_search import build_regex_search_filter
 from app.utils.permissions import permission_required
 
 
@@ -269,10 +270,29 @@ def customers_page():
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("main.dashboard"))
 
+    q = (request.args.get("q") or "").strip()
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+
+    query = {}
+    search_filter = build_regex_search_filter(
+        q,
+        text_fields=[
+            "company_name",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "address",
+            "default_labor_rate",
+        ],
+        object_id_fields=["_id", "shop_id", "tenant_id", "created_by", "updated_by"],
+    )
+    if search_filter:
+        query = {"$and": [query, search_filter]} if query else search_filter
+
     customers, pagination = paginate_find(
         coll,
-        {},
+        query,
         [("is_active", -1), ("company_name", 1), ("last_name", 1), ("first_name", 1), ("created_at", -1)],
         page,
         per_page,
@@ -285,6 +305,7 @@ def customers_page():
         active_page="customers",
         customers=customers,
         pagination=pagination,
+        q=q,
     )
 
 
@@ -312,6 +333,7 @@ def customer_details_page(customer_id):
     if tab not in allowed_tabs:
         tab = "work_orders"
 
+    q = (request.args.get("q") or "").strip()
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
     shop_db = coll.database
     labor_rates = _get_labor_rates(shop_db, shop["_id"])
@@ -359,6 +381,14 @@ def customer_details_page(customer_id):
             "customer_id": cid,
             "is_active": True,
         }
+        wo_search = build_regex_search_filter(
+            q,
+            text_fields=["status"],
+            numeric_fields=["wo_number", "grand_total", "totals.grand_total", "totals.parts_total", "totals.labor_total"],
+            object_id_fields=["_id", "unit_id", "customer_id", "shop_id", "tenant_id"],
+        )
+        if wo_search:
+            wo_query = {"$and": [wo_query, wo_search]}
         work_orders, tab_pagination = paginate_find(
             shop_db.work_orders,
             wo_query,
@@ -404,13 +434,23 @@ def customer_details_page(customer_id):
             )
 
     elif tab == "units":
+        units_query = {
+            "shop_id": shop["_id"],
+            "customer_id": cid,
+            "is_active": True,
+        }
+        units_search = build_regex_search_filter(
+            q,
+            text_fields=["unit_number", "make", "model", "vin", "type"],
+            numeric_fields=["year", "mileage"],
+            object_id_fields=["_id", "customer_id", "shop_id", "tenant_id"],
+        )
+        if units_search:
+            units_query = {"$and": [units_query, units_search]}
+
         units, tab_pagination = paginate_find(
             shop_db.units,
-            {
-                "shop_id": shop["_id"],
-                "customer_id": cid,
-                "is_active": True,
-            },
+            units_query,
             [("created_at", -1)],
             page,
             per_page,
@@ -453,13 +493,34 @@ def customer_details_page(customer_id):
         wo_map = {wo.get("_id"): wo.get("wo_number") for wo in wo_rows if wo.get("_id")}
 
         if wo_ids:
+            payments_query = {
+                "shop_id": shop["_id"],
+                "work_order_id": {"$in": wo_ids},
+                "is_active": True,
+            }
+            payments_search = build_regex_search_filter(
+                q,
+                text_fields=["payment_method", "notes"],
+                numeric_fields=["amount"],
+                object_id_fields=["_id", "work_order_id", "shop_id", "created_by"],
+            )
+            if q:
+                wo_id_matches = [wo_id for wo_id, wo_num in wo_map.items() if q.lower() in str(wo_num or "").lower()]
+                extra = []
+                if wo_id_matches:
+                    extra.append({"work_order_id": {"$in": wo_id_matches}})
+                if payments_search and extra:
+                    payments_query = {"$and": [payments_query, {"$or": [payments_search, *extra]}]}
+                elif payments_search:
+                    payments_query = {"$and": [payments_query, payments_search]}
+                elif extra:
+                    payments_query = {"$and": [payments_query, {"$or": extra}]}
+            elif payments_search:
+                payments_query = {"$and": [payments_query, payments_search]}
+
             payments, tab_pagination = paginate_find(
                 shop_db.work_order_payments,
-                {
-                    "shop_id": shop["_id"],
-                    "work_order_id": {"$in": wo_ids},
-                    "is_active": True,
-                },
+                payments_query,
                 [("created_at", -1)],
                 page,
                 per_page,
@@ -495,6 +556,15 @@ def customer_details_page(customer_id):
             "is_active": True,
             "status": {"$in": estimate_statuses},
         }
+        estimate_search = build_regex_search_filter(
+            q,
+            text_fields=["status"],
+            numeric_fields=["wo_number", "grand_total", "totals.grand_total", "totals.parts_total", "totals.labor_total"],
+            object_id_fields=["_id", "unit_id", "customer_id", "shop_id", "tenant_id"],
+        )
+        if estimate_search:
+            estimate_query = {"$and": [estimate_query, estimate_search]}
+
         estimates, tab_pagination = paginate_find(
             shop_db.work_orders,
             estimate_query,
@@ -538,9 +608,131 @@ def customer_details_page(customer_id):
         customer=customer_view,
         customer_id=str(cid),
         active_tab=tab,
+        q=q,
         tab_items=tab_items,
         pagination=tab_pagination,
         labor_rates=labor_rates,
+    )
+
+
+@customers_bp.get("/customers/<customer_id>/units/<unit_id>")
+@login_required
+@permission_required("customers.view")
+def customer_unit_details_page(customer_id, unit_id):
+    coll, shop, master = _customers_collection()
+    if coll is None or shop is None:
+        flash("Shop database not configured for this shop.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    cid = _oid(customer_id)
+    uid = _oid(unit_id)
+    if not cid or not uid:
+        flash("Invalid customer or unit id.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    customer = coll.find_one({"_id": cid, "shop_id": shop["_id"]})
+    if not customer:
+        flash("Customer not found.", "error")
+        return redirect(url_for("customers.customers_page"))
+
+    shop_db = coll.database
+    unit = shop_db.units.find_one(
+        {"_id": uid, "customer_id": cid, "shop_id": shop["_id"], "is_active": True}
+    )
+    if not unit:
+        flash("Unit not found for this customer.", "error")
+        return redirect(url_for("customers.customer_details_page", customer_id=str(cid), tab="units"))
+
+    tab = (request.args.get("tab") or "work_orders").strip().lower()
+    if tab not in {"work_orders", "details"}:
+        tab = "work_orders"
+
+    q = (request.args.get("q") or "").strip()
+    page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+
+    tab_items = []
+    pagination = None
+
+    if tab == "work_orders":
+        wo_query = {
+            "shop_id": shop["_id"],
+            "customer_id": cid,
+            "unit_id": uid,
+            "is_active": True,
+        }
+        wo_search = build_regex_search_filter(
+            q,
+            text_fields=["status"],
+            numeric_fields=["wo_number", "grand_total", "totals.grand_total", "totals.parts_total", "totals.labor_total"],
+            object_id_fields=["_id", "unit_id", "customer_id", "shop_id", "tenant_id"],
+        )
+        if wo_search:
+            wo_query = {"$and": [wo_query, wo_search]}
+        rows, pagination = paginate_find(
+            shop_db.work_orders,
+            wo_query,
+            [("created_at", -1)],
+            page,
+            per_page,
+            projection={
+                "wo_number": 1,
+                "status": 1,
+                "created_at": 1,
+                "totals": 1,
+                "grand_total": 1,
+            },
+        )
+
+        row_ids = [x.get("_id") for x in rows if x.get("_id")]
+        paid_map = _build_paid_map(shop_db.work_order_payments, row_ids)
+
+        for row in rows:
+            row_id = row.get("_id")
+            grand_total = _order_grand_total(row)
+            paid_amount = _round2(paid_map.get(row_id, 0.0))
+            remaining = _round2(grand_total - paid_amount)
+            if remaining < 0:
+                remaining = 0.0
+
+            tab_items.append(
+                {
+                    "id": str(row_id),
+                    "wo_number": row.get("wo_number") or "-",
+                    "status": (row.get("status") or "open").strip().lower(),
+                    "created_at": _fmt_dt_label(row.get("created_at")),
+                    "grand_total": grand_total,
+                    "paid_amount": paid_amount,
+                    "remaining_balance": remaining,
+                }
+            )
+
+    else:
+        pagination = _empty_pagination(page, per_page)
+
+    unit_view = {
+        "id": str(unit.get("_id")),
+        "unit_number": unit.get("unit_number") or "-",
+        "label": _unit_label(unit),
+        "vin": unit.get("vin") or "-",
+        "year": unit.get("year") if unit.get("year") is not None else "-",
+        "make": unit.get("make") or "-",
+        "model": unit.get("model") or "-",
+        "type": unit.get("type") or "-",
+        "mileage": unit.get("mileage") if unit.get("mileage") is not None else "-",
+        "created_at": _fmt_dt_label(unit.get("created_at")),
+        "updated_at": _fmt_dt_label(unit.get("updated_at")),
+    }
+
+    return _render_app_page(
+        "public/customers/unit_details.html",
+        active_page="customers",
+        customer_id=str(cid),
+        customer_label=_customer_label(customer),
+        unit=unit_view,
+        active_tab=tab,
+        q=q,
+        tab_items=tab_items,
+        pagination=pagination,
     )
 
 

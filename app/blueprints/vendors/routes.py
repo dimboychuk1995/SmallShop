@@ -15,6 +15,7 @@ from app.utils.auth import (
 )
 from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.permissions import permission_required
+from app.utils.mongo_search import build_regex_search_filter
 
 
 def utcnow():
@@ -101,10 +102,30 @@ def vendors_page():
         flash("Shop database not configured for this shop.", "error")
         return redirect(url_for("main.dashboard"))
 
+    q = (request.args.get("q") or "").strip()
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+
+    query = {}
+    search_filter = build_regex_search_filter(
+        q,
+        text_fields=[
+            "name",
+            "phone",
+            "email",
+            "website",
+            "address",
+            "primary_contact_first_name",
+            "primary_contact_last_name",
+            "notes",
+        ],
+        object_id_fields=["_id", "shop_id", "tenant_id", "created_by", "updated_by"],
+    )
+    if search_filter:
+        query = {"$and": [query, search_filter]} if query else search_filter
+
     vendors, pagination = paginate_find(
         coll,
-        {},
+        query,
         [("is_active", -1), ("name", 1), ("created_at", -1)],
         page,
         per_page,
@@ -115,6 +136,7 @@ def vendors_page():
         active_page="vendors",
         vendors=vendors,
         pagination=pagination,
+        q=q,
     )
 
 

@@ -20,6 +20,23 @@
 
 <div class="card">
   <div class="card-body">
+    <form method="get" class="row g-2 align-items-center mb-3">
+      <div class="col-12 col-md-8 col-lg-6">
+        <input
+          type="text"
+          name="q"
+          class="form-control form-control-sm"
+          placeholder="Search vendors by any field..."
+          value="{{ q or '' }}"
+        />
+      </div>
+      {% if q %}
+        <div class="col-auto">
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('vendors.vendors_page') }}">Reset</a>
+        </div>
+      {% endif %}
+    </form>
+
     {% if vendors and vendors|length > 0 %}
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
@@ -123,9 +140,9 @@
           </div>
           <div class="btn-group btn-group-sm" role="group" aria-label="Vendors pagination">
             <a class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
-               href="{{ url_for('vendors.vendors_page', page=pagination.prev_page, per_page=pagination.per_page) }}">Prev</a>
+              href="{{ url_for('vendors.vendors_page', page=pagination.prev_page, per_page=pagination.per_page, q=q) }}">Prev</a>
             <a class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
-               href="{{ url_for('vendors.vendors_page', page=pagination.next_page, per_page=pagination.per_page) }}">Next</a>
+              href="{{ url_for('vendors.vendors_page', page=pagination.next_page, per_page=pagination.per_page, q=q) }}">Next</a>
           </div>
         </div>
       {% endif %}
