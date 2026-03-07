@@ -214,7 +214,7 @@ def parts_page():
         return redirect(url_for("main.dashboard"))
 
     active_tab = (request.args.get("tab") or "parts").strip().lower()
-    if active_tab not in {"parts", "orders"}:
+    if active_tab not in {"parts", "orders", "cores", "cores_returns"}:
         active_tab = "parts"
 
     q = (request.args.get("q") or "").strip()
@@ -232,6 +232,13 @@ def parts_page():
         max_per_page=100,
         page_key="orders_page",
         per_page_key="orders_per_page",
+    )
+    cores_page_num, cores_per_page = get_pagination_params(
+        request.args,
+        default_per_page=20,
+        max_per_page=100,
+        page_key="cores_page",
+        per_page_key="cores_per_page",
     )
 
     vendor_ids_by_name = []
@@ -383,6 +390,46 @@ def parts_page():
                 "created_at": _fmt_dt_label(order.get("created_at")),
             })
 
+    # Get cores list for Cores tab
+    cores_list = []
+    cores_pagination = None
+    cores_coll = parts_coll.database.cores if parts_coll is not None else None
+    if cores_coll is not None:
+        cores_query = {
+            "shop_id": shop["_id"],
+            "is_active": {"$ne": False},
+            "quantity": {"$gt": 0},
+        }
+        cores_search_filter = build_regex_search_filter(
+            q,
+            text_fields=["part_number", "description"],
+            numeric_fields=["quantity", "core_cost"],
+            object_id_fields=["_id", "part_id", "shop_id", "tenant_id", "created_by", "updated_by"],
+        )
+        if cores_search_filter:
+            cores_query = {"$and": [cores_query, cores_search_filter]}
+
+        cores_rows, cores_pagination = paginate_find(
+            cores_coll,
+            cores_query,
+            [("part_number", 1), ("updated_at", -1)],
+            cores_page_num,
+            cores_per_page,
+        )
+
+        for core in cores_rows:
+            cores_list.append(
+                {
+                    "id": str(core.get("_id")),
+                    "part_id": str(core.get("part_id")) if core.get("part_id") else "",
+                    "part_number": core.get("part_number") or "-",
+                    "description": core.get("description") or "",
+                    "core_cost": float(core.get("core_cost") or 0),
+                    "quantity": int(core.get("quantity") or 0),
+                    "updated_at": _fmt_dt_label(core.get("updated_at")),
+                }
+            )
+
     return _render_app_page(
         "public/parts.html",
         active_page="parts",
@@ -396,6 +443,8 @@ def parts_page():
         locations=locations,
         last_order_id=last_order_id,
         orders=orders_list,
+        cores=cores_list,
+        cores_pagination=cores_pagination,
     )
 
 

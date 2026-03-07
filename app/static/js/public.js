@@ -7,6 +7,8 @@
 		"parts_per_page",
 		"orders_page",
 		"orders_per_page",
+		"cores_page",
+		"cores_per_page",
 	];
 	var activeSearchController = null;
 

@@ -84,6 +84,8 @@
 			}
 
 		const vendorSelect = document.getElementById("order_vendor");
+		const vendorSearchInput = document.getElementById("order_vendor_search");
+		const vendorDropdown = document.getElementById("orderVendorDropdown");
 		const partSearch = document.getElementById("partSearch");
 		const dropdown = document.getElementById("partSearchDropdown");
 		const itemsBody = document.getElementById("orderItemsBody");
@@ -100,9 +102,13 @@
 		let orderItems = [];
 		let currentOrderStatus = null;
 
-			if (!vendorSelect || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !receiveBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount) {
+			if (!vendorSelect || !vendorSearchInput || !vendorDropdown || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !receiveBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount) {
 			return;
 		}
+
+		const vendorOptions = Array.from(vendorSelect.options)
+			.filter((opt) => opt.value)
+			.map((opt) => ({ id: String(opt.value), label: String(opt.textContent || "").trim() }));
 
 		let searchAbort = null;
 
@@ -153,6 +159,61 @@
 		function hideDropdown() {
 			dropdown.style.display = "none";
 			dropdown.innerHTML = "";
+		}
+
+		function hideVendorDropdown() {
+			vendorDropdown.style.display = "none";
+			vendorDropdown.innerHTML = "";
+		}
+
+		function showVendorDropdown() {
+			vendorDropdown.style.display = "block";
+		}
+
+		function getVendorLabelById(vendorId) {
+			const option = vendorSelect.querySelector(`option[value="${vendorId}"]`);
+			if (!option) return "";
+			return String(option.textContent || "").trim();
+		}
+
+		function syncVendorSearchFromSelect() {
+			const vendorId = String(vendorSelect.value || "").trim();
+			if (!vendorId) {
+				vendorSearchInput.value = "";
+				vendorSearchInput.placeholder = "Search vendor...";
+				return;
+			}
+			vendorSearchInput.value = getVendorLabelById(vendorId);
+		}
+
+		function renderVendorDropdown(filterText) {
+			const q = String(filterText || "").trim().toLowerCase();
+			const visible = q
+				? vendorOptions.filter((v) => v.label.toLowerCase().includes(q))
+				: vendorOptions;
+
+			vendorDropdown.innerHTML = "";
+			if (visible.length === 0) {
+				vendorDropdown.innerHTML = `<div class="list-group-item text-muted">No vendors found</div>`;
+				showVendorDropdown();
+				return;
+			}
+
+			visible.forEach((vendor) => {
+				const btn = document.createElement("button");
+				btn.type = "button";
+				btn.className = "list-group-item list-group-item-action";
+				btn.textContent = vendor.label;
+				btn.addEventListener("click", function () {
+					vendorSelect.value = vendor.id;
+					vendorSelect.dispatchEvent(new Event("change", { bubbles: true }));
+					syncVendorSearchFromSelect();
+					hideVendorDropdown();
+				});
+				vendorDropdown.appendChild(btn);
+			});
+
+			showVendorDropdown();
 		}
 
 		function showDropdown() {
@@ -291,10 +352,21 @@
 			if (vendorSelect.disabled) {
 				return;
 			}
+			syncVendorSearchFromSelect();
 			partSearch.disabled = !vendorSelect.value;
 			partSearch.value = "";
 			hideDropdown();
 			if (vendorSelect.value) partSearch.focus();
+		});
+
+		vendorSearchInput.addEventListener("focus", function () {
+			if (vendorSearchInput.disabled) return;
+			renderVendorDropdown(vendorSearchInput.value);
+		});
+
+		vendorSearchInput.addEventListener("input", function () {
+			if (vendorSearchInput.disabled) return;
+			renderVendorDropdown(vendorSearchInput.value);
 		});
 
 		partSearch.addEventListener("input", async function () {
@@ -342,6 +414,7 @@
 
 		document.addEventListener("click", function (e) {
 			if (!dropdown.contains(e.target) && e.target !== partSearch) hideDropdown();
+			if (!vendorDropdown.contains(e.target) && e.target !== vendorSearchInput) hideVendorDropdown();
 		});
 
 		itemsBody.addEventListener("click", function (e) {
@@ -562,16 +635,19 @@
 			// Prevent editing received orders
 			if (isReceived) {
 				vendorSelect.disabled = true;
+				vendorSearchInput.disabled = true;
 				partSearch.disabled = true;
 				createOrderBtn.disabled = true;
 			} else {
 				vendorSelect.disabled = false;
+				vendorSearchInput.disabled = false;
 				partSearch.disabled = !vendorSelect.value;
 				createOrderBtn.disabled = false;
 			}
 			
 			// Set vendor
 				vendorSelect.value = order.vendor_id || "";
+				syncVendorSearchFromSelect();
 				// Clear current items
 				orderItems = [];
 				// Load items from order
@@ -602,6 +678,9 @@
 		orderModal?.addEventListener("hidden.bs.modal", function () {
 			vendorSelect.value = "";
 			vendorSelect.disabled = false;
+			vendorSearchInput.value = "";
+			vendorSearchInput.disabled = false;
+			hideVendorDropdown();
 			partSearch.value = "";
 			partSearch.disabled = true;
 			dropdown.style.display = "none";
@@ -733,6 +812,9 @@
 
 			vendorSelect.disabled = false;
 			vendorSelect.value = "";
+			vendorSearchInput.disabled = false;
+			vendorSearchInput.value = "";
+			hideVendorDropdown();
 			partSearch.disabled = true;
 			partSearch.value = "";
 			hideDropdown();

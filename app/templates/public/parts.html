@@ -26,7 +26,7 @@
 <div class="mt-3">
   <ul class="nav nav-tabs" role="tablist">
     <li class="nav-item" role="presentation">
-      <a class="nav-link {% if active_tab != 'orders' %}active{% endif %}" id="tab-parts" href="{{ url_for('parts.parts_page', tab='parts', q=q) }}" role="tab" aria-controls="content-parts" aria-selected="{{ 'true' if active_tab != 'orders' else 'false' }}">
+      <a class="nav-link {% if active_tab == 'parts' %}active{% endif %}" id="tab-parts" href="{{ url_for('parts.parts_page', tab='parts', q=q) }}" role="tab" aria-controls="content-parts" aria-selected="{{ 'true' if active_tab == 'parts' else 'false' }}">
         Parts
       </a>
     </li>
@@ -35,13 +35,23 @@
         Parts Orders
       </a>
     </li>
+    <li class="nav-item" role="presentation">
+      <a class="nav-link {% if active_tab == 'cores' %}active{% endif %}" id="tab-cores" href="{{ url_for('parts.parts_page', tab='cores', q=q) }}" role="tab" aria-controls="content-cores" aria-selected="{{ 'true' if active_tab == 'cores' else 'false' }}">
+        Cores
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a class="nav-link {% if active_tab == 'cores_returns' %}active{% endif %}" id="tab-cores-returns" href="{{ url_for('parts.parts_page', tab='cores_returns', q=q) }}" role="tab" aria-controls="content-cores-returns" aria-selected="{{ 'true' if active_tab == 'cores_returns' else 'false' }}">
+        Cores Returns
+      </a>
+    </li>
   </ul>
 </div>
 
 <!-- Tab Content -->
 <div class="tab-content mt-3">
   <!-- Parts Tab -->
-  <div class="tab-pane fade {% if active_tab != 'orders' %}show active{% endif %}" id="content-parts" role="tabpanel" aria-labelledby="tab-parts">
+  <div class="tab-pane fade {% if active_tab == 'parts' %}show active{% endif %}" id="content-parts" role="tabpanel" aria-labelledby="tab-parts">
     <div class="card">
       <div class="card-body">
 
@@ -251,6 +261,88 @@
       </div>
     </div>
   </div>
+
+  <!-- Cores Tab -->
+  <div class="tab-pane fade {% if active_tab == 'cores' %}show active{% endif %}" id="content-cores" role="tabpanel" aria-labelledby="tab-cores">
+    <div class="card">
+      <div class="card-body">
+        <form method="get" class="row g-2 align-items-center mb-3">
+          <input type="hidden" name="tab" value="cores" />
+          <div class="col-12 col-md-8 col-lg-6">
+            <input type="text" name="q" class="form-control form-control-sm" placeholder="Search cores by any field..." value="{{ q or '' }}" />
+          </div>
+          {% if q %}
+            <div class="col-auto">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('parts.parts_page', tab='cores') }}">Reset</a>
+            </div>
+          {% endif %}
+        </form>
+
+        {% if cores and cores|length > 0 %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th style="min-width: 160px;">Part #</th>
+                  <th>Description</th>
+                  <th class="text-end" style="width: 130px;">Core Cost</th>
+                  <th class="text-end" style="width: 130px;">Quantity</th>
+                  <th style="width: 180px;">Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in cores %}
+                  <tr>
+                    <td class="fw-semibold">{{ c.part_number }}</td>
+                    <td class="text-muted">{{ c.description if c.description else '-' }}</td>
+                    <td class="text-end">${{ "%.2f"|format(c.core_cost or 0) }}</td>
+                    <td class="text-end fw-semibold">{{ c.quantity or 0 }}</td>
+                    <td>{{ c.updated_at }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          {% if cores_pagination and cores_pagination.pages > 1 %}
+            <div class="d-flex align-items-center justify-content-between mt-3">
+              <div class="small text-muted">
+                Page {{ cores_pagination.page }} of {{ cores_pagination.pages }} · {{ cores_pagination.total }} total
+              </div>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Cores pagination">
+                <a class="btn btn-outline-secondary {% if not cores_pagination.has_prev %}disabled{% endif %}"
+                   href="{{ url_for('parts.parts_page', tab='cores', q=q, cores_page=cores_pagination.prev_page, cores_per_page=cores_pagination.per_page) }}">Prev</a>
+                <a class="btn btn-outline-secondary {% if not cores_pagination.has_next %}disabled{% endif %}"
+                   href="{{ url_for('parts.parts_page', tab='cores', q=q, cores_page=cores_pagination.next_page, cores_per_page=cores_pagination.per_page) }}">Next</a>
+              </div>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="text-muted">No cores found.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Cores Returns Tab -->
+  <div class="tab-pane fade {% if active_tab == 'cores_returns' %}show active{% endif %}" id="content-cores-returns" role="tabpanel" aria-labelledby="tab-cores-returns">
+    <div class="card">
+      <div class="card-body">
+        <form method="get" class="row g-2 align-items-center mb-3">
+          <input type="hidden" name="tab" value="cores_returns" />
+          <div class="col-12 col-md-8 col-lg-6">
+            <input type="text" name="q" class="form-control form-control-sm" placeholder="Search core returns by any field..." value="{{ q or '' }}" />
+          </div>
+          {% if q %}
+            <div class="col-auto">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('parts.parts_page', tab='cores_returns') }}">Reset</a>
+            </div>
+          {% endif %}
+        </form>
+        <div class="text-muted">Cores Returns tab is empty for now.</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Create Part Modal -->
@@ -401,9 +493,22 @@
 
       <div class="modal-body">
         <div class="row g-3 mb-3">
-          <div class="col-md-6">
+          <div class="col-md-6 position-relative">
             <label class="form-label">Vendor <span class="text-danger">*</span></label>
-            <select class="form-select" id="order_vendor" required>
+            <input
+              type="text"
+              id="order_vendor_search"
+              class="form-control"
+              placeholder="Search vendor..."
+              autocomplete="off"
+            >
+            <div
+              id="orderVendorDropdown"
+              class="list-group position-absolute shadow-sm"
+              style="z-index:1060; display:none; max-height:260px; overflow:auto; width:calc(100% - 24px);"
+            ></div>
+
+            <select class="form-select d-none" id="order_vendor" required>
               <option value="" selected disabled>-- Select vendor --</option>
               {% if vendors and vendors|length > 0 %}
                 {% for v in vendors %}
