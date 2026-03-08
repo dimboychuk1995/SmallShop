@@ -100,10 +100,38 @@
       </div>
     </div>
 
-    <div class="card h-100">
+    <div class="card mb-3">
       <div class="card-body">
         <div class="small text-muted">Outstanding Balance (All Time)</div>
         <div class="h4 mb-0 mt-1">${{ "%.2f"|format(outstanding_balance or 0) }}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="small text-muted mb-2">Labor Hours By Mechanic (Selected Period)</div>
+        {% if mechanic_hours_rows %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Mechanic</th>
+                  <th class="text-end">Hours</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in mechanic_hours_rows %}
+                  <tr>
+                    <td>{{ row.name }}</td>
+                    <td class="text-end">{{ "%.2f"|format(row.hours or 0) }} h</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="small text-muted">No assigned mechanic hours for selected period.</div>
+        {% endif %}
       </div>
     </div>
   </div>

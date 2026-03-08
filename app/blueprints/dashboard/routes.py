@@ -180,6 +180,13 @@ def _round2(value):
         return 0.0
 
 
+def _to_float(value):
+    try:
+        return float(str(value).strip())
+    except Exception:
+        return 0.0
+
+
 @dashboard_bp.get("/dashboard")
 @login_required
 @permission_required("dashboard.view")
@@ -208,7 +215,15 @@ def dashboard():
     period_wo_rows = list(
         shop_db.work_orders.find(
             date_match,
-            {"_id": 1, "totals": 1, "grand_total": 1, "labor_total": 1, "parts_total": 1},
+            {
+                "_id": 1,
+                "totals": 1,
+                "grand_total": 1,
+                "labor_total": 1,
+                "parts_total": 1,
+                "labors": 1,
+                "blocks": 1,
+            },
         )
     )
 
@@ -217,6 +232,7 @@ def dashboard():
     period_labor_total = 0.0
     period_parts_total = 0.0
     period_grand_total = 0.0
+    mechanic_hours_map = {}
     for wo in period_wo_rows:
         totals = wo.get("totals") if isinstance(wo.get("totals"), dict) else {}
         labor_total = totals.get("labor_total") if totals.get("labor_total") is not None else wo.get("labor_total")
@@ -225,6 +241,58 @@ def dashboard():
         period_labor_total = _round2(period_labor_total + _round2(labor_total))
         period_parts_total = _round2(period_parts_total + _round2(parts_total))
         period_grand_total = _round2(period_grand_total + _round2(grand_total))
+
+        labor_blocks = wo.get("labors") if isinstance(wo.get("labors"), list) else []
+        if not labor_blocks and isinstance(wo.get("blocks"), list):
+            labor_blocks = wo.get("blocks")
+
+        for block in labor_blocks:
+            if not isinstance(block, dict):
+                continue
+            labor_doc = block.get("labor") if isinstance(block.get("labor"), dict) else {}
+            hours_raw = labor_doc.get("hours") if labor_doc.get("hours") is not None else block.get("labor_hours")
+            hours_value = max(0.0, _to_float(hours_raw))
+            if hours_value <= 0:
+                continue
+
+            assigned = labor_doc.get("assigned_mechanics")
+            if not isinstance(assigned, list):
+                assigned = block.get("assigned_mechanics")
+            if not isinstance(assigned, list) or not assigned:
+                continue
+
+            for item in assigned:
+                if not isinstance(item, dict):
+                    continue
+                share = _to_float(item.get("percent"))
+                if share <= 0:
+                    continue
+                share_hours = hours_value * (share / 100.0)
+
+                mechanic_id = str(item.get("user_id") or "").strip()
+                mechanic_name = str(item.get("name") or "").strip()
+                if not mechanic_name:
+                    mechanic_name = str(item.get("email") or "").strip()
+                if not mechanic_name:
+                    mechanic_name = "Unknown mechanic"
+
+                mechanic_key = mechanic_id or mechanic_name.lower()
+                row = mechanic_hours_map.get(mechanic_key)
+                if row is None:
+                    row = {
+                        "user_id": mechanic_id,
+                        "name": mechanic_name,
+                        "hours": 0.0,
+                    }
+                    mechanic_hours_map[mechanic_key] = row
+
+                row["hours"] = _round2(row["hours"] + share_hours)
+
+    mechanic_hours_rows = sorted(
+        mechanic_hours_map.values(),
+        key=lambda x: _to_float(x.get("hours")),
+        reverse=True,
+    )
 
     period_wo_ids = [x.get("_id") for x in period_wo_rows if x.get("_id")]
     period_paid_map = {}
@@ -303,6 +371,7 @@ def dashboard():
         period_labor_total=period_labor_total,
         period_parts_total=period_parts_total,
         period_grand_total=period_grand_total,
+        mechanic_hours_rows=mechanic_hours_rows,
         period_money_total=period_money_total,
         period_total=period_total,
         paid_percent=paid_percent,
