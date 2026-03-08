@@ -1530,7 +1530,7 @@ def work_orders_page():
     shop_db, shop = get_shop_db()
     if shop_db is None:
         flash("Shop database not configured.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     q = (request.args.get("q") or "").strip()
     paid_status = (request.args.get("paid_status") or "all").strip().lower()
@@ -1596,7 +1596,7 @@ def work_order_details_page():
     shop_db, shop = get_shop_db()
     if shop_db is None:
         flash("Shop database not configured.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     customer_id = oid(request.args.get("customer_id"))
     unit_id = oid(request.args.get("unit_id"))
@@ -1651,7 +1651,7 @@ def create_unit():
     shop_db, shop = get_shop_db()
     if shop_db is None:
         flash("Shop database not configured.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     customer_id = oid(request.form.get("customer_id"))
     if not customer_id:
@@ -1698,7 +1698,7 @@ def create_work_order():
     shop_db, shop = get_shop_db()
     if shop_db is None:
         flash("Shop database not configured.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     customer_id = oid(request.form.get("customer_id"))
     unit_id = oid(request.form.get("unit_id"))

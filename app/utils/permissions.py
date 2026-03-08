@@ -119,7 +119,7 @@ def permission_required(permission_key: str):
                 return jsonify({"ok": False, "error": "forbidden", "required": permission_key}), 403
 
             flash("Access denied.", "error")
-            return redirect(url_for("main.dashboard"))
+            return redirect(url_for("dashboard.dashboard"))
         return wrapper
     return decorator
 

@@ -1,0 +1,95 @@
+.dashboard-donut-wrap {
+  position: relative;
+  width: 186px;
+  height: 186px;
+  margin: 0 auto;
+}
+
+.dashboard-donut-glow {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(47, 131, 86, 0.2) 0%, rgba(47, 131, 86, 0) 70%);
+  filter: blur(6px);
+}
+
+.dashboard-donut {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    conic-gradient(from -90deg, #2d8b58 0 var(--paid), #d25a5a var(--paid) 100%),
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 45%);
+  box-shadow:
+    inset 0 0 0 1px rgba(31, 107, 67, 0.2),
+    0 12px 26px rgba(22, 58, 36, 0.18);
+}
+
+.dashboard-donut::after {
+  content: "";
+  position: absolute;
+  inset: 30px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff 0%, #f4faf4 100%);
+  box-shadow: inset 0 0 0 1px #d2ded4, inset 0 8px 12px rgba(31, 107, 67, 0.05);
+}
+
+.dashboard-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.dashboard-donut-percent {
+  margin-top: 0.1rem;
+  font-size: 0.78rem;
+  color: #3d5f4d;
+  font-weight: 700;
+}
+
+.dashboard-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.35rem;
+}
+
+.dashboard-dot-paid {
+  background: #2a7a4f;
+}
+
+.dashboard-dot-unpaid {
+  background: #c44545;
+}
+
+.dashboard-legend-row {
+  color: #3d5e4d;
+  font-weight: 600;
+}
+
+.dashboard-goal-progress {
+  height: 0.95rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #e7efe9 0%, #dae6dd 100%);
+  box-shadow: inset 0 1px 2px rgba(22, 53, 34, 0.15);
+}
+
+.dashboard-goal-progress .progress-bar {
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, #1f6b43 0%, #2f8356 60%, #45a06a 100%),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.15) 0,
+      rgba(255, 255, 255, 0.15) 8px,
+      rgba(255, 255, 255, 0.02) 8px,
+      rgba(255, 255, 255, 0.02) 16px
+    );
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+}

@@ -120,7 +120,7 @@ def login():
     session["user_permissions"] = perms
     session.modified = True
 
-    return redirect(url_for("main.dashboard"))
+    return redirect(url_for("dashboard.dashboard"))
 
 
 @auth_bp.get("/logout")

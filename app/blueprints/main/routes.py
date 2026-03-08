@@ -15,7 +15,7 @@ def index():
 
 # Единый список меню (добавлять новые страницы — 1 строка тут)
 NAV_ITEMS = [
-    {"key": "dashboard", "label": "Dashboard", "endpoint": "main.dashboard"},
+    {"key": "dashboard", "label": "Dashboard", "endpoint": "dashboard.dashboard"},
 
     {"key": "parts", "label": "Parts", "endpoint": "parts.parts_page"},
     {"key": "vendors", "label": "Vendors", "endpoint": "vendors.vendors_page"},
@@ -180,40 +180,33 @@ def set_active_shop():
     shop_id_raw = (request.form.get("shop_id") or "").strip()
     if not shop_id_raw:
         flash("Shop is required.", "error")
-        return redirect(request.referrer or url_for("main.dashboard"))
+        return redirect(request.referrer or url_for("dashboard.dashboard"))
 
     allowed = session.get("shop_ids") or []
     allowed = [str(x) for x in allowed]
 
     if shop_id_raw not in allowed:
         flash("You don't have access to this shop.", "error")
-        return redirect(request.referrer or url_for("main.dashboard"))
+        return redirect(request.referrer or url_for("dashboard.dashboard"))
 
     try:
         shop_oid = ObjectId(shop_id_raw)
     except Exception:
         flash("Invalid shop id.", "error")
-        return redirect(request.referrer or url_for("main.dashboard"))
+        return redirect(request.referrer or url_for("dashboard.dashboard"))
 
     shop = master.shops.find_one({"_id": shop_oid, "tenant_id": tenant["_id"]})
     if not shop:
         flash("Shop not found.", "error")
-        return redirect(request.referrer or url_for("main.dashboard"))
+        return redirect(request.referrer or url_for("dashboard.dashboard"))
 
     session["shop_id"] = shop_id_raw
     session.modified = True
 
-    return redirect(request.referrer or url_for("main.dashboard"))
+    return redirect(request.referrer or url_for("dashboard.dashboard"))
 
 
 # ===== Pages =====
-
-@main_bp.get("/dashboard")
-@login_required
-@permission_required("dashboard.view")
-def dashboard():
-    return _render_app_page("public/dashboard.html", active_page="dashboard")
-
 
 @main_bp.get("/settings")
 @login_required

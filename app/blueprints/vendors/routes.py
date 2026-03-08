@@ -96,7 +96,7 @@ def vendors_page():
     coll, shop, master = _vendors_collection()
     if coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     q = (request.args.get("q") or "").strip()
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)

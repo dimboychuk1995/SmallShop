@@ -2,6 +2,11 @@
 
 {% block page_title %}Dashboard{% endblock %}
 
+{% block extra_styles %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css', v='20260308-dashboard-v2') }}">
+{% endblock %}
+
 {% block app_content %}
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
@@ -10,9 +15,97 @@
   </div>
 </div>
 
-<div class="card">
+<div class="card mb-3">
   <div class="card-body">
-    <div class="text-muted">Empty page.</div>
+    <form method="get" class="row g-2 align-items-center wo-filter-form">
+      <input type="hidden" name="q" value="" />
+      <div class="col-12">
+        <div class="row g-2 align-items-center wo-date-row">
+          <div class="col-12 col-md-4 col-lg-3">
+            <select name="date_preset" class="form-select form-select-sm date-preset-select" aria-label="Dashboard date range preset">
+              <option value="today" {% if date_preset == 'today' %}selected{% endif %}>Today</option>
+              <option value="yesterday" {% if date_preset == 'yesterday' %}selected{% endif %}>Yesterday</option>
+              <option value="this_week" {% if (date_preset or 'this_week') == 'this_week' %}selected{% endif %}>This Week</option>
+              <option value="last_week" {% if date_preset == 'last_week' %}selected{% endif %}>Last Week</option>
+              <option value="this_month" {% if date_preset == 'this_month' %}selected{% endif %}>This Month</option>
+              <option value="last_month" {% if date_preset == 'last_month' %}selected{% endif %}>Last Month</option>
+              <option value="this_quarter" {% if date_preset == 'this_quarter' %}selected{% endif %}>This Quarter</option>
+              <option value="last_quarter" {% if date_preset == 'last_quarter' %}selected{% endif %}>Last Quarter</option>
+              <option value="this_year" {% if date_preset == 'this_year' %}selected{% endif %}>This Year</option>
+              <option value="last_year" {% if date_preset == 'last_year' %}selected{% endif %}>Last Year</option>
+              <option value="custom" {% if date_preset == 'custom' %}selected{% endif %}>Custom Range</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6 col-lg-5">
+            <div class="input-group input-group-sm date-range-group" aria-label="Dashboard date range">
+              <span class="input-group-text">From</span>
+              <input type="date" name="date_from" class="form-control date-filter-input" value="{{ date_from or '' }}" aria-label="Start date" />
+              <span class="input-group-text">To</span>
+              <input type="date" name="date_to" class="form-control date-filter-input" value="{{ date_to or '' }}" aria-label="End date" />
+            </div>
+          </div>
+          <div class="col-12 col-md-2 col-lg d-flex align-items-center justify-content-lg-end justify-content-center wo-reset-wrap">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('dashboard.dashboard') }}">Reset</a>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="small text-muted mb-2">Work Orders Paid vs Unpaid (Money)</div>
+        <div class="dashboard-donut-wrap">
+          <div class="dashboard-donut-glow"></div>
+          <div class="dashboard-donut" style="--paid: {{ '%.2f'|format(paid_percent or 0) }}%"></div>
+          <div class="dashboard-donut-center">
+            <div class="small text-muted">In Period</div>
+            <div class="fw-semibold">${{ "%.2f"|format(period_money_total or 0) }}</div>
+            <div class="small text-muted">WO Count: {{ period_total or 0 }}</div>
+            <div class="dashboard-donut-percent">{{ '%.1f'|format(paid_percent or 0) }}% paid</div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-center gap-3 mt-3 small dashboard-legend-row">
+          <span><span class="dashboard-dot dashboard-dot-paid"></span> Paid: ${{ "%.2f"|format(period_paid_amount or 0) }}</span>
+          <span><span class="dashboard-dot dashboard-dot-unpaid"></span> Unpaid: ${{ "%.2f"|format(period_unpaid_amount or 0) }}</span>
+        </div>
+        <div class="wo-totals-center mt-2">
+          <div class="wo-totals-box">
+            <span>Labor: <strong>${{ "%.2f"|format(period_labor_total or 0) }}</strong></span>
+            <span>Parts: <strong>${{ "%.2f"|format(period_parts_total or 0) }}</strong></span>
+            <span>Total: <strong>${{ "%.2f"|format(period_grand_total or 0) }}</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-8">
+    <div class="card h-100 mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="small text-muted">Goal Progress (Selected Period)</div>
+          <div class="small text-muted">Goal: {{ goal_count or 0 }}</div>
+        </div>
+        <div class="progress dashboard-goal-progress mb-2" role="progressbar" aria-label="Goal progress" aria-valuenow="{{ '%.0f'|format(goal_percent or 0) }}" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar" style="width: {{ '%.2f'|format(goal_percent or 0) }}%"></div>
+        </div>
+        <div class="small text-muted">
+          Current: <strong>{{ period_wo_total or 0 }}</strong> / {{ goal_count or 0 }}
+          ({{ '%.1f'|format(goal_percent or 0) }}%)
+        </div>
+      </div>
+    </div>
+
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="small text-muted">Outstanding Balance (All Time)</div>
+        <div class="h4 mb-0 mt-1">${{ "%.2f"|format(outstanding_balance or 0) }}</div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -207,7 +207,7 @@ def parts_page():
     parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
     if parts_coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     active_tab = (request.args.get("tab") or "parts").strip().lower()
     if active_tab not in {"parts", "orders", "cores", "cores_returns"}:

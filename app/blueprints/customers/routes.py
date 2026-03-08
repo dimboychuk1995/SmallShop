@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 from flask import request, redirect, url_for, flash, session, jsonify
@@ -32,6 +32,186 @@ def _round2(value):
 
 def _fmt_dt_label(dt):
     return format_date_mmddyyyy(dt)
+
+
+def _parse_iso_date_utc(value: str):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.strptime(raw, "%Y-%m-%d")
+        return parsed.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _to_iso_date(value):
+    if not value:
+        return ""
+    return value.strftime("%Y-%m-%d")
+
+
+def _start_of_week_monday(value):
+    return value - timedelta(days=value.weekday())
+
+
+def _start_of_month(value):
+    return value.replace(day=1)
+
+
+def _start_of_quarter(value):
+    quarter_start_month = ((value.month - 1) // 3) * 3 + 1
+    return value.replace(month=quarter_start_month, day=1)
+
+
+def _start_of_year(value):
+    return value.replace(month=1, day=1)
+
+
+def _date_range_for_preset(preset: str, today):
+    if preset == "today":
+        return today, today
+    if preset == "yesterday":
+        y = today - timedelta(days=1)
+        return y, y
+    if preset == "this_week":
+        return _start_of_week_monday(today), today
+    if preset == "last_week":
+        this_week_start = _start_of_week_monday(today)
+        last_week_start = this_week_start - timedelta(days=7)
+        return last_week_start, this_week_start - timedelta(days=1)
+    if preset == "this_month":
+        return _start_of_month(today), today
+    if preset == "last_month":
+        this_month_start = _start_of_month(today)
+        last_month_end = this_month_start - timedelta(days=1)
+        return _start_of_month(last_month_end), last_month_end
+    if preset == "this_quarter":
+        return _start_of_quarter(today), today
+    if preset == "last_quarter":
+        this_quarter_start = _start_of_quarter(today)
+        last_quarter_end = this_quarter_start - timedelta(days=1)
+        return _start_of_quarter(last_quarter_end), last_quarter_end
+    if preset == "this_year":
+        return _start_of_year(today), today
+    if preset == "last_year":
+        this_year_start = _start_of_year(today)
+        last_year_end = this_year_start - timedelta(days=1)
+        return _start_of_year(last_year_end), last_year_end
+    return None, None
+
+
+def _get_date_range_filters(args, from_key: str = "date_from", to_key: str = "date_to", preset_key: str = "date_preset"):
+    allowed_presets = {
+        "custom",
+        "today",
+        "yesterday",
+        "this_week",
+        "last_week",
+        "this_month",
+        "last_month",
+        "this_quarter",
+        "last_quarter",
+        "this_year",
+        "last_year",
+    }
+
+    date_from_raw = (args.get(from_key) or "").strip()
+    date_to_raw = (args.get(to_key) or "").strip()
+    preset_raw = (args.get(preset_key) or "").strip().lower()
+
+    if preset_raw not in allowed_presets:
+        preset_raw = "this_week"
+
+    if preset_raw == "custom":
+        date_from = date_from_raw
+        date_to = date_to_raw
+        if not date_from and not date_to:
+            preset_raw = "this_week"
+            start_date, end_date = _date_range_for_preset(preset_raw, datetime.now(timezone.utc).date())
+            date_from = _to_iso_date(start_date)
+            date_to = _to_iso_date(end_date)
+    else:
+        start_date, end_date = _date_range_for_preset(preset_raw, datetime.now(timezone.utc).date())
+        date_from = _to_iso_date(start_date)
+        date_to = _to_iso_date(end_date)
+
+    created_from = _parse_iso_date_utc(date_from)
+    created_to_raw = _parse_iso_date_utc(date_to)
+
+    if created_from and created_to_raw and created_from > created_to_raw:
+        created_from, created_to_raw = created_to_raw, created_from
+        date_from, date_to = date_to, date_from
+
+    created_to_exclusive = created_to_raw + timedelta(days=1) if created_to_raw else None
+    return {
+        "date_from": date_from,
+        "date_to": date_to,
+        "date_preset": preset_raw,
+        "created_from": created_from,
+        "created_to_exclusive": created_to_exclusive,
+    }
+
+
+def _append_and_filter(query: dict, extra_filter: dict):
+    if not extra_filter:
+        return query
+    return {"$and": [query, extra_filter]}
+
+
+def _build_created_at_range_filter(created_from=None, created_to_exclusive=None):
+    created_filter = {}
+    if created_from:
+        created_filter["$gte"] = created_from
+    if created_to_exclusive:
+        created_filter["$lt"] = created_to_exclusive
+    if not created_filter:
+        return None
+    return {"created_at": created_filter}
+
+
+def _get_customer_work_orders_totals(shop_db, query: dict):
+    pipeline = [
+        {"$match": query},
+        {
+            "$group": {
+                "_id": None,
+                "labor_total": {"$sum": {"$ifNull": ["$totals.labor_total", {"$ifNull": ["$labor_total", 0]}]}},
+                "parts_total": {"$sum": {"$ifNull": ["$totals.parts_total", {"$ifNull": ["$parts_total", 0]}]}},
+                "grand_total": {"$sum": {"$ifNull": ["$totals.grand_total", {"$ifNull": ["$grand_total", 0]}]}},
+            }
+        },
+    ]
+
+    rows = list(shop_db.work_orders.aggregate(pipeline))
+    if not rows:
+        return {"labor_total": 0.0, "parts_total": 0.0, "grand_total": 0.0}
+
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    return {
+        "labor_total": _round2(row.get("labor_total") or 0),
+        "parts_total": _round2(row.get("parts_total") or 0),
+        "grand_total": _round2(row.get("grand_total") or 0),
+    }
+
+
+def _get_customer_payments_totals(shop_db, query: dict):
+    pipeline = [
+        {"$match": query},
+        {
+            "$group": {
+                "_id": None,
+                "amount_total": {"$sum": {"$ifNull": ["$amount", 0]}},
+            }
+        },
+    ]
+
+    rows = list(shop_db.work_order_payments.aggregate(pipeline))
+    if not rows:
+        return {"amount_total": 0.0}
+
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    return {"amount_total": _round2(row.get("amount_total") or 0)}
 
 
 def _customer_label(customer: dict) -> str:
@@ -264,7 +444,7 @@ def customers_page():
     coll, shop, master = _customers_collection()
     if coll is None or shop is None:
         flash("Shop database not configured for this shop.", "error")
-        return redirect(url_for("main.dashboard"))
+        return redirect(url_for("dashboard.dashboard"))
 
     q = (request.args.get("q") or "").strip()
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
@@ -330,6 +510,17 @@ def customer_details_page(customer_id):
         tab = "work_orders"
 
     q = (request.args.get("q") or "").strip()
+    paid_status = (request.args.get("paid_status") or "all").strip().lower()
+    if paid_status not in ("all", "paid", "unpaid"):
+        paid_status = "all"
+
+    date_filters = _get_date_range_filters(request.args)
+    date_from = date_filters["date_from"]
+    date_to = date_filters["date_to"]
+    date_preset = date_filters["date_preset"]
+    created_from = date_filters["created_from"]
+    created_to_exclusive = date_filters["created_to_exclusive"]
+
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
     shop_db = coll.database
     labor_rates = _get_labor_rates(shop_db, shop["_id"])
@@ -370,6 +561,9 @@ def customer_details_page(customer_id):
 
     tab_items = []
     tab_pagination = None
+    work_orders_totals = {"labor_total": 0.0, "parts_total": 0.0, "grand_total": 0.0}
+    payments_totals = {"amount_total": 0.0}
+    estimates_totals = {"labor_total": 0.0, "parts_total": 0.0, "grand_total": 0.0}
 
     if tab == "work_orders":
         wo_query = {
@@ -377,6 +571,11 @@ def customer_details_page(customer_id):
             "customer_id": cid,
             "is_active": True,
         }
+        if paid_status == "paid":
+            wo_query["status"] = "paid"
+        elif paid_status == "unpaid":
+            wo_query["status"] = {"$ne": "paid"}
+
         wo_search = build_regex_search_filter(
             q,
             text_fields=["status"],
@@ -385,6 +584,13 @@ def customer_details_page(customer_id):
         )
         if wo_search:
             wo_query = {"$and": [wo_query, wo_search]}
+
+        created_at_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+        if created_at_filter:
+            wo_query = _append_and_filter(wo_query, created_at_filter)
+
+        work_orders_totals = _get_customer_work_orders_totals(shop_db, wo_query)
+
         work_orders, tab_pagination = paginate_find(
             shop_db.work_orders,
             wo_query,
@@ -514,6 +720,12 @@ def customer_details_page(customer_id):
             elif payments_search:
                 payments_query = {"$and": [payments_query, payments_search]}
 
+            created_at_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+            if created_at_filter:
+                payments_query = _append_and_filter(payments_query, created_at_filter)
+
+            payments_totals = _get_customer_payments_totals(shop_db, payments_query)
+
             payments, tab_pagination = paginate_find(
                 shop_db.work_order_payments,
                 payments_query,
@@ -561,6 +773,12 @@ def customer_details_page(customer_id):
         if estimate_search:
             estimate_query = {"$and": [estimate_query, estimate_search]}
 
+        created_at_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+        if created_at_filter:
+            estimate_query = _append_and_filter(estimate_query, created_at_filter)
+
+        estimates_totals = _get_customer_work_orders_totals(shop_db, estimate_query)
+
         estimates, tab_pagination = paginate_find(
             shop_db.work_orders,
             estimate_query,
@@ -607,6 +825,13 @@ def customer_details_page(customer_id):
         q=q,
         tab_items=tab_items,
         pagination=tab_pagination,
+        work_orders_totals=work_orders_totals,
+        payments_totals=payments_totals,
+        estimates_totals=estimates_totals,
+        paid_status=paid_status,
+        date_from=date_from,
+        date_to=date_to,
+        date_preset=date_preset,
         labor_rates=labor_rates,
     )
 
