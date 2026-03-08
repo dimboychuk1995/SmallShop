@@ -223,6 +223,7 @@ def dashboard():
                 "parts_total": 1,
                 "labors": 1,
                 "blocks": 1,
+                "status": 1,
             },
         )
     )
@@ -308,9 +309,16 @@ def dashboard():
     period_unpaid_amount = 0.0
     for wo in period_wo_rows:
         totals = wo.get("totals") if isinstance(wo.get("totals"), dict) else {}
+        status = str(wo.get("status") or "").strip().lower()
         grand_total = totals.get("grand_total") if totals.get("grand_total") is not None else wo.get("grand_total")
         grand_total = _round2(grand_total)
         paid_amount = _round2(period_paid_map.get(wo.get("_id"), 0))
+
+        # Backward-compatible fallback: some datasets mark status as paid without
+        # storing rows in work_order_payments.
+        if status == "paid":
+            paid_amount = _round2(max(paid_amount, grand_total))
+
         paid_capped = _round2(min(grand_total, paid_amount))
         unpaid_amount = _round2(max(0.0, grand_total - paid_capped))
         period_paid_amount = _round2(period_paid_amount + paid_capped)
@@ -318,6 +326,44 @@ def dashboard():
 
     period_money_total = _round2(period_paid_amount + period_unpaid_amount)
     paid_percent = (period_paid_amount / period_money_total * 100.0) if period_money_total else 0.0
+
+    parts_orders_query = {"shop_id": shop["_id"], "is_active": {"$ne": False}}
+    if created_filter:
+        parts_orders_query["created_at"] = created_filter
+
+    period_parts_orders_rows = list(
+        shop_db.parts_orders.find(
+            parts_orders_query,
+            {"_id": 1, "status": 1, "items": 1},
+        )
+    )
+
+    period_parts_orders_total = len(period_parts_orders_rows)
+    period_parts_orders_received = 0
+    period_parts_orders_ordered = 0
+    period_parts_orders_total_amount = 0.0
+    for order in period_parts_orders_rows:
+        status = str(order.get("status") or "").strip().lower()
+        order_amount = 0.0
+        for item in (order.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            qty = max(0, int(_to_float(item.get("quantity"))))
+            price = max(0.0, _to_float(item.get("price")))
+            order_amount = _round2(order_amount + (qty * price))
+
+        period_parts_orders_total_amount = _round2(period_parts_orders_total_amount + order_amount)
+
+        if status == "received":
+            period_parts_orders_received += 1
+        else:
+            period_parts_orders_ordered += 1
+
+    parts_orders_received_percent = (
+        (period_parts_orders_received / period_parts_orders_total) * 100.0
+        if period_parts_orders_total
+        else 0.0
+    )
 
     all_time_base = {"shop_id": shop["_id"], "is_active": True}
     all_time_wo_total = shop_db.work_orders.count_documents(all_time_base)
@@ -336,7 +382,7 @@ def dashboard():
     wo_rows = list(
         shop_db.work_orders.find(
             all_time_base,
-            {"_id": 1, "totals": 1, "grand_total": 1},
+            {"_id": 1, "totals": 1, "grand_total": 1, "status": 1},
         )
     )
     wo_ids = [x.get("_id") for x in wo_rows if x.get("_id")]
@@ -353,9 +399,14 @@ def dashboard():
     outstanding_balance = 0.0
     for wo in wo_rows:
         totals = wo.get("totals") if isinstance(wo.get("totals"), dict) else {}
+        status = str(wo.get("status") or "").strip().lower()
         grand_total = totals.get("grand_total") if totals.get("grand_total") is not None else wo.get("grand_total")
         grand_total = _round2(grand_total)
         paid_amount = _round2(paid_map.get(wo.get("_id"), 0))
+
+        if status == "paid":
+            paid_amount = _round2(max(paid_amount, grand_total))
+
         remaining = _round2(grand_total - paid_amount)
         if remaining > 0:
             outstanding_balance = _round2(outstanding_balance + remaining)
@@ -375,6 +426,11 @@ def dashboard():
         period_money_total=period_money_total,
         period_total=period_total,
         paid_percent=paid_percent,
+        period_parts_orders_total=period_parts_orders_total,
+        period_parts_orders_received=period_parts_orders_received,
+        period_parts_orders_ordered=period_parts_orders_ordered,
+        parts_orders_received_percent=parts_orders_received_percent,
+        period_parts_orders_total_amount=period_parts_orders_total_amount,
         goal_count=goal_count,
         period_wo_total=period_total,
         all_time_wo_total=all_time_wo_total,

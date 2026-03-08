@@ -4,7 +4,7 @@
 
 {% block extra_styles %}
   {{ super() }}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css', v='20260308-dashboard-v2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css', v='20260308-dashboard-v3') }}">
 {% endblock %}
 
 {% block app_content %}
@@ -55,7 +55,7 @@
 
 <div class="row g-3">
   <div class="col-12 col-lg-4">
-    <div class="card h-100">
+    <div class="card mb-3">
       <div class="card-body">
         <div class="small text-muted mb-2">Work Orders Paid vs Unpaid (Money)</div>
         <div class="dashboard-donut-wrap">
@@ -81,10 +81,35 @@
         </div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="small text-muted mb-2">Parts Orders: Received vs Ordered</div>
+        <div class="dashboard-donut-wrap">
+          <div class="dashboard-donut-glow dashboard-donut-glow-po"></div>
+          <div class="dashboard-donut dashboard-donut-po" style="--received: {{ '%.2f'|format(parts_orders_received_percent or 0) }}%"></div>
+          <div class="dashboard-donut-center">
+            <div class="small text-muted">In Period</div>
+            <div class="fw-semibold">{{ period_parts_orders_total or 0 }}</div>
+            <div class="small text-muted">Parts Orders</div>
+            <div class="dashboard-donut-percent">{{ '%.1f'|format(parts_orders_received_percent or 0) }}% received</div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-center gap-3 mt-3 small dashboard-legend-row">
+          <span><span class="dashboard-dot dashboard-dot-received"></span> Received: {{ period_parts_orders_received or 0 }}</span>
+          <span><span class="dashboard-dot dashboard-dot-ordered"></span> Ordered: {{ period_parts_orders_ordered or 0 }}</span>
+        </div>
+        <div class="wo-totals-center mt-2">
+          <div class="wo-totals-box">
+            <span>Spend: <strong>${{ "%.2f"|format(period_parts_orders_total_amount or 0) }}</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="col-12 col-lg-8">
-    <div class="card h-100 mb-3">
+    <div class="card mb-3">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div class="small text-muted">Goal Progress (Selected Period)</div>
