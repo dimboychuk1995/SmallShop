@@ -103,7 +103,7 @@
 		let orderItems = [];
 		let currentOrderStatus = null;
 
-			if (!vendorSelect || !vendorSearchInput || !vendorDropdown || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !receiveBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount) {
+			if (!vendorSelect || !vendorSearchInput || !vendorDropdown || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount) {
 			return;
 		}
 
@@ -545,7 +545,9 @@
 		}
 
 		createOrderBtn.addEventListener("click", createOrderAjax);
-		receiveBtn.addEventListener("click", receiveOrderAjax);
+		if (receiveBtn) {
+			receiveBtn.addEventListener("click", receiveOrderAjax);
+		}
 
 		// Receive order button in modal
 		if (receiveOrderModalBtn) {
@@ -651,14 +653,17 @@
 				syncVendorSearchFromSelect();
 				// Clear current items
 				orderItems = [];
-				// Load items from order
-				if (Array.isArray(order.items)) {
-					orderItems = order.items.map(item => ({
+				// Load items from order (supports legacy payloads)
+				const rawItems = Array.isArray(order.items)
+					? order.items
+					: (Array.isArray(order.parts) ? order.parts : []);
+				if (rawItems.length > 0) {
+					orderItems = rawItems.map(item => ({
 						part_id: item.part_id,
 						part_number: item.part_number,
 						description: item.description,
-						quantity: item.quantity,
-						price: item.price,
+						quantity: item.quantity ?? item.qty ?? 0,
+						price: item.price ?? item.cost ?? 0,
 						core_has_charge: item.core_has_charge || false,
 						core_cost: item.core_cost || 0
 					}));
@@ -668,7 +673,7 @@
 				// Mark as editing
 				createdOrderId.value = orderId;
 				orderCreatedBox.classList.add("d-none");
-				createOrderBtn.textContent = "Update order";
+				createOrderBtn.textContent = "Save";
 			} catch (err) {
 				showError("Network error while loading order");
 			}
@@ -694,6 +699,7 @@
 			createOrderBtn.disabled = false;
 			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = "none";
 			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = "none";
+			if (receiveBtn) receiveBtn.disabled = false;
 		});
 
 		const partHistoryModal = document.getElementById("partHistoryModal");
@@ -813,6 +819,12 @@
 
 		document.addEventListener("show.bs.modal", function (e) {
 			if (!e.target || e.target.id !== "orderModal") return;
+
+			const trigger = e.relatedTarget;
+			const isEditOpen = !!(trigger && trigger.classList && trigger.classList.contains("editOrderBtn"));
+			if (isEditOpen) {
+				return;
+			}
 
 			clearError();
 

@@ -1017,9 +1017,14 @@ def parts_api_orders_get(order_id: str):
     if not order:
         return jsonify({"ok": False, "error": "Order not found"}), 404
 
-    # Convert items for JSON serialization
+    # Convert items for JSON serialization. Keep backward compatibility with
+    # older docs where item keys can differ.
     items = []
-    part_ids = [item.get("part_id") for item in (order.get("items") or []) if item.get("part_id")]
+    raw_items = order.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = order.get("parts") if isinstance(order.get("parts"), list) else []
+
+    part_ids = [item.get("part_id") for item in raw_items if isinstance(item, dict) and item.get("part_id")]
     
     # Fetch parts data to get core charge info
     parts_map = {}
@@ -1030,17 +1035,20 @@ def parts_api_orders_get(order_id: str):
         )
         parts_map = {p["_id"]: p for p in parts_cursor}
     
-    for item in (order.get("items") or []):
+    for item in raw_items:
         if isinstance(item, dict):
             part_id = item.get("part_id")
             part_data = parts_map.get(part_id, {}) if part_id else {}
+
+            quantity = item.get("quantity") if item.get("quantity") is not None else item.get("qty")
+            price = item.get("price") if item.get("price") is not None else item.get("cost")
             
             items.append({
                 "part_id": str(part_id) if part_id else "",
                 "part_number": item.get("part_number") or "",
                 "description": item.get("description") or "",
-                "quantity": item.get("quantity") or 0,
-                "price": float(item.get("price") or 0),
+                "quantity": quantity or 0,
+                "price": float(price or 0),
                 "core_has_charge": bool(part_data.get("core_has_charge", False)),
                 "core_cost": float(part_data.get("core_cost") or 0.0),
             })

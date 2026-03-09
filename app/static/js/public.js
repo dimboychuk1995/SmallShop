@@ -188,6 +188,8 @@
 		var delayMs = 450;
 		var timer = null;
 		var lastSubmittedSignature = buildFormSignature(form, input);
+		var actionPath = getFormActionPath(form);
+		var useAjaxSearch = !/^\/parts(\/|$)/.test(actionPath);
 
 		function submitIfChanged() {
 			var nextSignature = buildFormSignature(form, input);
@@ -195,10 +197,19 @@
 				return;
 			}
 			lastSubmittedSignature = nextSignature;
-			runSearch(form, input);
+			if (useAjaxSearch) {
+				runSearch(form, input);
+				return;
+			}
+
+			window.location.assign(buildSearchUrl(form, input).toString());
 		}
 
 		form.addEventListener("submit", function (event) {
+			if (!useAjaxSearch) {
+				return;
+			}
+
 			event.preventDefault();
 			if (timer) {
 				window.clearTimeout(timer);
@@ -207,6 +218,10 @@
 		});
 
 		input.addEventListener("input", function () {
+			if (!useAjaxSearch) {
+				return;
+			}
+
 			if (timer) {
 				window.clearTimeout(timer);
 			}
@@ -248,6 +263,12 @@
 					presetSelect.value = "custom";
 				}
 			}
+
+			if (!useAjaxSearch) {
+				window.location.assign(buildSearchUrl(form, input).toString());
+				return;
+			}
+
 			submitIfChanged();
 		});
 	}
