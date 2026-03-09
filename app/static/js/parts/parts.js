@@ -99,11 +99,12 @@
 		const orderTotalAmount = document.getElementById("orderTotalAmount");
 		const receiveOrderModalBtn = document.getElementById("receiveOrderModalBtn");
 		const unreceiveOrderModalBtn = document.getElementById("unreceiveOrderModalBtn");
+		const nonInventoryBody = document.getElementById("nonInventoryBody");
 
 		let orderItems = [];
 		let currentOrderStatus = null;
 
-			if (!vendorSelect || !vendorSearchInput || !vendorDropdown || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount) {
+			if (!vendorSelect || !vendorSearchInput || !vendorDropdown || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount || !nonInventoryBody) {
 			return;
 		}
 
@@ -153,8 +154,103 @@
 					}
 				}
 			});
+
+			const nonInventoryRows = Array.from(nonInventoryBody.querySelectorAll("tr"));
+			nonInventoryRows.forEach((tr) => {
+				const amount = parseFloat((tr.querySelector(".non-inv-amount")?.value || "0"));
+				if (Number.isFinite(amount) && amount > 0) {
+					total += amount;
+				}
+			});
 			
 			orderTotalAmount.textContent = "$" + total.toFixed(2);
+		}
+
+		function nonInventoryRowHasData(tr) {
+			if (!tr) return false;
+			const type = String(tr.querySelector(".non-inv-type")?.value || "").trim();
+			const desc = String(tr.querySelector(".non-inv-desc")?.value || "").trim();
+			const amount = parseFloat(tr.querySelector(".non-inv-amount")?.value || "0");
+			return !!type || !!desc || (Number.isFinite(amount) && amount > 0);
+		}
+
+		function appendNonInventoryRow(type, description, amount, disabled) {
+			const tr = document.createElement("tr");
+			tr.innerHTML = `
+				<td>
+					<select class="form-select form-select-sm non-inv-type" ${disabled ? "disabled" : ""}>
+						<option value="">-- Select type --</option>
+						<option value="shop_supply" ${type === "shop_supply" ? "selected" : ""}>shop supply</option>
+						<option value="tools" ${type === "tools" ? "selected" : ""}>tools</option>
+						<option value="payment_to_another_service" ${type === "payment_to_another_service" ? "selected" : ""}>payment to another service</option>
+					</select>
+				</td>
+				<td>
+					<input type="text" class="form-control form-control-sm non-inv-desc" maxlength="200" placeholder="e.g. bolts, shop supplies, tool" value="${escapeHtml(description || "")}" ${disabled ? "disabled" : ""}>
+				</td>
+				<td class="text-end">
+					<input type="number" class="form-control form-control-sm text-end non-inv-amount" min="0" step="0.01" value="${Number(amount || 0) > 0 ? Number(amount).toFixed(2) : ""}" ${disabled ? "disabled" : ""}>
+				</td>
+				<td class="text-end">
+					<button type="button" class="btn btn-sm btn-outline-danger non-inv-remove-btn" ${disabled ? "disabled" : ""}>Remove</button>
+				</td>
+			`;
+			nonInventoryBody.appendChild(tr);
+			return tr;
+		}
+
+		function ensureTrailingNonInventoryRow(disabled) {
+			const rows = Array.from(nonInventoryBody.querySelectorAll("tr"));
+			if (rows.length === 0) {
+				appendNonInventoryRow("", "", 0, !!disabled);
+				return;
+			}
+			const last = rows[rows.length - 1];
+			if (nonInventoryRowHasData(last) && !disabled) {
+				appendNonInventoryRow("", "", 0, false);
+			}
+		}
+
+		function renderNonInventoryRows(lines, disabled) {
+			nonInventoryBody.innerHTML = "";
+			const source = Array.isArray(lines) ? lines : [];
+			source.forEach((line) => {
+				if (!line || typeof line !== "object") return;
+				appendNonInventoryRow(line.type || "", line.description || "", line.amount || 0, !!disabled);
+			});
+			ensureTrailingNonInventoryRow(!!disabled);
+			calculateOrderTotal();
+		}
+
+		function collectNonInventoryAmounts() {
+			const rows = Array.from(nonInventoryBody.querySelectorAll("tr"));
+			const lines = [];
+			for (const tr of rows) {
+				const type = String(tr.querySelector(".non-inv-type")?.value || "").trim();
+				const description = String(tr.querySelector(".non-inv-desc")?.value || "").trim();
+				const rawAmount = String(tr.querySelector(".non-inv-amount")?.value || "").trim();
+				const amount = parseFloat(rawAmount || "0");
+
+				if (!type && !description && !rawAmount) {
+					continue;
+				}
+
+				if (!type) {
+					return { lines: [], error: "Select non inventory type." };
+				}
+
+				if (!description) {
+					return { lines: [], error: "Non inventory description is required." };
+				}
+
+				if (!Number.isFinite(amount) || amount <= 0) {
+					return { lines: [], error: "Non inventory amount must be greater than 0." };
+				}
+
+				lines.push({ type, description, amount: Number(amount.toFixed(2)) });
+			}
+
+			return { lines, error: null };
 		}
 
 		function hideDropdown() {
@@ -440,6 +536,24 @@
 			}
 		});
 
+		nonInventoryBody.addEventListener("input", function (e) {
+			if (e.target.classList.contains("non-inv-desc") || e.target.classList.contains("non-inv-amount")) {
+				ensureTrailingNonInventoryRow(vendorSelect.disabled);
+				calculateOrderTotal();
+			}
+		});
+
+		nonInventoryBody.addEventListener("click", function (e) {
+			const btn = e.target.closest(".non-inv-remove-btn");
+			if (!btn) return;
+			if (btn.disabled || vendorSelect.disabled) return;
+
+			const tr = btn.closest("tr");
+			if (tr) tr.remove();
+			ensureTrailingNonInventoryRow(false);
+			calculateOrderTotal();
+		});
+
 		async function createOrderAjax() {
 			clearError();
 
@@ -447,7 +561,14 @@
 			if (!vendorId) { showError("Select vendor."); return; }
 
 			const rows = Array.from(itemsBody.querySelectorAll("tr[data-part-id]"));
-			if (rows.length === 0) { showError("Add at least one item."); return; }
+
+			const nonInventoryPayload = collectNonInventoryAmounts();
+			if (nonInventoryPayload.error) { showError(nonInventoryPayload.error); return; }
+
+			if (rows.length === 0 && nonInventoryPayload.lines.length === 0) {
+				showError("Add at least one item or non inventory amount.");
+				return;
+			}
 
 			// Check if order is received
 			if (vendorSelect.disabled) {
@@ -480,7 +601,7 @@
 				const res = await fetch(endpoint, {
 					method: method,
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ vendor_id: vendorId, items }),
+					body: JSON.stringify({ vendor_id: vendorId, items, non_inventory_amounts: nonInventoryPayload.lines }),
 				});
 				const data = await res.json();
 
@@ -505,6 +626,10 @@
 					if (p) p.disabled = true;
 					const rm = tr.querySelector(".remove-item-btn");
 					if (rm) rm.disabled = true;
+				});
+
+				Array.from(nonInventoryBody.querySelectorAll("input,button")).forEach((el) => {
+					el.disabled = true;
 				});
 
 			} catch (e) {
@@ -668,8 +793,13 @@
 						core_cost: item.core_cost || 0
 					}));
 				}
+
+				const nonInventoryLines = Array.isArray(order.non_inventory_amounts)
+					? order.non_inventory_amounts
+					: [];
 				// Render items
 				renderOrderItems();
+				renderNonInventoryRows(nonInventoryLines, isReceived);
 				// Mark as editing
 				createdOrderId.value = orderId;
 				orderCreatedBox.classList.add("d-none");
@@ -692,6 +822,7 @@
 			dropdown.style.display = "none";
 			orderItems = [];
 			renderOrderItems();
+			renderNonInventoryRows([], false);
 			createdOrderId.value = "";
 			orderCreatedBox.classList.add("d-none");
 			orderAlert.classList.add("d-none");
@@ -848,6 +979,7 @@
 					<td colspan="5" class="text-muted">No items added.</td>
 				</tr>
 			`;
+			renderNonInventoryRows([], false);
 			
 			orderTotalAmount.textContent = "$0.00";
 			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = "none";

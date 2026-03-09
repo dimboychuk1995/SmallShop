@@ -101,6 +101,8 @@
         </div>
         <div class="wo-totals-center mt-2">
           <div class="wo-totals-box">
+            <span>Items: <strong>${{ "%.2f"|format(period_parts_orders_items_amount or 0) }}</strong></span>
+            <span>Non-inventory: <strong>${{ "%.2f"|format(period_parts_orders_non_inventory_amount or 0) }}</strong></span>
             <span>Spend: <strong>${{ "%.2f"|format(period_parts_orders_total_amount or 0) }}</strong></span>
           </div>
         </div>

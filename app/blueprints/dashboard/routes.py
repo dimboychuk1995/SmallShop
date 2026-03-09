@@ -334,13 +334,15 @@ def dashboard():
     period_parts_orders_rows = list(
         shop_db.parts_orders.find(
             parts_orders_query,
-            {"_id": 1, "status": 1, "items": 1},
+            {"_id": 1, "status": 1, "items": 1, "non_inventory_amounts": 1},
         )
     )
 
     period_parts_orders_total = len(period_parts_orders_rows)
     period_parts_orders_received = 0
     period_parts_orders_ordered = 0
+    period_parts_orders_items_amount = 0.0
+    period_parts_orders_non_inventory_amount = 0.0
     period_parts_orders_total_amount = 0.0
     for order in period_parts_orders_rows:
         status = str(order.get("status") or "").strip().lower()
@@ -350,7 +352,16 @@ def dashboard():
                 continue
             qty = max(0, int(_to_float(item.get("quantity"))))
             price = max(0.0, _to_float(item.get("price")))
-            order_amount = _round2(order_amount + (qty * price))
+            line_amount = _round2(qty * price)
+            period_parts_orders_items_amount = _round2(period_parts_orders_items_amount + line_amount)
+            order_amount = _round2(order_amount + line_amount)
+
+        for line in (order.get("non_inventory_amounts") or []):
+            if not isinstance(line, dict):
+                continue
+            amount = max(0.0, _to_float(line.get("amount")))
+            period_parts_orders_non_inventory_amount = _round2(period_parts_orders_non_inventory_amount + amount)
+            order_amount = _round2(order_amount + amount)
 
         period_parts_orders_total_amount = _round2(period_parts_orders_total_amount + order_amount)
 
@@ -430,6 +441,8 @@ def dashboard():
         period_parts_orders_received=period_parts_orders_received,
         period_parts_orders_ordered=period_parts_orders_ordered,
         parts_orders_received_percent=parts_orders_received_percent,
+        period_parts_orders_items_amount=period_parts_orders_items_amount,
+        period_parts_orders_non_inventory_amount=period_parts_orders_non_inventory_amount,
         period_parts_orders_total_amount=period_parts_orders_total_amount,
         goal_count=goal_count,
         period_wo_total=period_total,

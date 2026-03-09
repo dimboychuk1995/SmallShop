@@ -18,6 +18,13 @@ from app.utils.display_datetime import format_date_mmddyyyy
 from . import parts_bp
 
 
+NON_INVENTORY_AMOUNT_TYPES = {
+    "shop_supply",
+    "tools",
+    "payment_to_another_service",
+}
+
+
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -115,6 +122,99 @@ def _parse_float(value: str, default: float = 0.0) -> float:
         return float(str(value).strip())
     except Exception:
         return default
+
+
+def _parse_non_inventory_amounts(raw_lines):
+    if not isinstance(raw_lines, list):
+        return [], None
+
+    out = []
+    for line in raw_lines:
+        if not isinstance(line, dict):
+            continue
+
+        amount_type = str(line.get("type") or "").strip().lower()
+        description = str(line.get("description") or "").strip()
+        amount = _parse_float(line.get("amount"), default=0.0)
+
+        if not amount_type and not description and amount <= 0:
+            continue
+
+        if amount_type not in NON_INVENTORY_AMOUNT_TYPES:
+            return [], "Select non inventory type."
+
+        if amount < 0:
+            return [], "Non inventory amount cannot be negative."
+
+        if amount <= 0:
+            return [], "Non inventory amount must be greater than 0."
+
+        if not description:
+            return [], "Non inventory amount description is required."
+
+        out.append({
+            "type": amount_type,
+            "description": description,
+            "amount": float(amount),
+        })
+
+    return out, None
+
+
+def _parts_order_amounts(order_doc: dict):
+    items_amount = 0.0
+    for item in (order_doc.get("items") or []):
+        if not isinstance(item, dict):
+            continue
+        qty = max(0, _parse_int(item.get("quantity"), default=0))
+        price = max(0.0, _parse_float(item.get("price"), default=0.0))
+        items_amount += qty * price
+
+    non_inventory_amount = 0.0
+    for line in (order_doc.get("non_inventory_amounts") or []):
+        if not isinstance(line, dict):
+            continue
+        non_inventory_amount += max(0.0, _parse_float(line.get("amount"), default=0.0))
+
+    total_amount = items_amount + non_inventory_amount
+    return {
+        "items_amount": float(items_amount),
+        "non_inventory_amount": float(non_inventory_amount),
+        "total_amount": float(total_amount),
+    }
+
+
+def _get_parts_orders_totals(orders_coll, query: dict):
+    totals = {
+        "total": 0.0,
+        "shop_supply": 0.0,
+        "tools": 0.0,
+        "another_service": 0.0,
+    }
+
+    cursor = orders_coll.find(query, {"items": 1, "non_inventory_amounts": 1})
+    for order in cursor:
+        amounts = _parts_order_amounts(order)
+        totals["total"] += amounts.get("total_amount") or 0.0
+
+        for line in (order.get("non_inventory_amounts") or []):
+            if not isinstance(line, dict):
+                continue
+            amount = max(0.0, _parse_float(line.get("amount"), default=0.0))
+            line_type = str(line.get("type") or "").strip().lower()
+            if line_type == "shop_supply":
+                totals["shop_supply"] += amount
+            elif line_type == "tools":
+                totals["tools"] += amount
+            elif line_type == "payment_to_another_service":
+                totals["another_service"] += amount
+
+    return {
+        "total": float(totals["total"]),
+        "shop_supply": float(totals["shop_supply"]),
+        "tools": float(totals["tools"]),
+        "another_service": float(totals["another_service"]),
+    }
 
 
 def _validate_ref(coll, ref_id_raw: str, label: str):
@@ -464,6 +564,12 @@ def parts_page():
     # Get orders list for Orders tab
     orders_list = []
     orders_pagination = None
+    orders_totals = {
+        "total": 0.0,
+        "shop_supply": 0.0,
+        "tools": 0.0,
+        "another_service": 0.0,
+    }
     if orders_coll is not None:
         orders_query = {"shop_id": shop["_id"], "is_active": {"$ne": False}}
 
@@ -494,6 +600,8 @@ def parts_page():
         elif orders_search_filter:
             orders_query = {"$and": [orders_query, orders_search_filter]}
 
+        orders_totals = _get_parts_orders_totals(orders_coll, orders_query)
+
         orders_rows, orders_pagination = paginate_find(
             orders_coll,
             orders_query,
@@ -510,12 +618,14 @@ def parts_page():
                 vendors_map[v.get("_id")] = _name_from_doc(v)
         
         for order in orders_rows:
+            amounts = _parts_order_amounts(order)
             orders_list.append({
                 "id": str(order.get("_id")),
                 "order_number": order.get("order_number"),
                 "vendor": vendors_map.get(order.get("vendor_id")) or "-",
                 "status": order.get("status") or "ordered",
                 "items_count": len(order.get("items") or []),
+                "total_amount": amounts.get("total_amount") or 0.0,
                 "created_at": _fmt_dt_label(order.get("created_at")),
             })
 
@@ -574,6 +684,7 @@ def parts_page():
         orders=orders_list,
         cores=cores_list,
         cores_pagination=cores_pagination,
+        orders_totals=orders_totals,
         date_preset=date_preset,
         date_from=date_from,
         date_to=date_to,
@@ -921,8 +1032,12 @@ def parts_api_orders_create():
         return jsonify({"ok": False, "error": err}), 400
 
     items_in = data.get("items") or []
-    if not isinstance(items_in, list) or len(items_in) == 0:
-        return jsonify({"ok": False, "error": "Add at least one item."}), 400
+    if not isinstance(items_in, list):
+        items_in = []
+
+    non_inventory_amounts, non_inventory_err = _parse_non_inventory_amounts(data.get("non_inventory_amounts") or [])
+    if non_inventory_err:
+        return jsonify({"ok": False, "error": non_inventory_err}), 400
 
     items = []
     for it in items_in:
@@ -950,7 +1065,7 @@ def parts_api_orders_create():
             "quantity": int(qty),
         })
 
-    if not items:
+    if not items and not non_inventory_amounts:
         return jsonify({"ok": False, "error": "No valid items in order."}), 400
 
     now = utcnow()
@@ -964,6 +1079,7 @@ def parts_api_orders_create():
         "vendor_id": vendor_oid,
         "order_number": order_number,
         "items": items,
+        "non_inventory_amounts": non_inventory_amounts,
         "status": "ordered",
         "is_active": True,
         "created_at": now,
@@ -976,7 +1092,14 @@ def parts_api_orders_create():
 
     res = orders_coll.insert_one(order_doc)
 
-    return jsonify({"ok": True, "order_id": str(res.inserted_id), "items_count": len(items)})
+    return jsonify(
+        {
+            "ok": True,
+            "order_id": str(res.inserted_id),
+            "items_count": len(items),
+            "non_inventory_count": len(non_inventory_amounts),
+        }
+    )
 
 def _recalc_weighted_avg(old_qty: int, old_avg: float, add_qty: int, add_price: float) -> float:
     """
@@ -1060,6 +1183,15 @@ def parts_api_orders_get(order_id: str):
             "vendor_id": str(order.get("vendor_id")) if order.get("vendor_id") else "",
             "status": order.get("status") or "ordered",
             "items": items,
+            "non_inventory_amounts": [
+                {
+                    "type": str(x.get("type") or "shop_supply").strip().lower(),
+                    "description": str(x.get("description") or "").strip(),
+                    "amount": float(_parse_float(x.get("amount"), default=0.0)),
+                }
+                for x in (order.get("non_inventory_amounts") or [])
+                if isinstance(x, dict)
+            ],
             "created_at": _fmt_dt_iso(order.get("created_at")),
         }
     })
@@ -1102,8 +1234,12 @@ def parts_api_orders_update(order_id: str):
         return jsonify({"ok": False, "error": err}), 400
 
     items_in = data.get("items") or []
-    if not isinstance(items_in, list) or len(items_in) == 0:
-        return jsonify({"ok": False, "error": "Add at least one item."}), 400
+    if not isinstance(items_in, list):
+        items_in = []
+
+    non_inventory_amounts, non_inventory_err = _parse_non_inventory_amounts(data.get("non_inventory_amounts") or [])
+    if non_inventory_err:
+        return jsonify({"ok": False, "error": non_inventory_err}), 400
 
     items = []
     for it in items_in:
@@ -1131,7 +1267,7 @@ def parts_api_orders_update(order_id: str):
             "quantity": int(qty),
         })
 
-    if not items:
+    if not items and not non_inventory_amounts:
         return jsonify({"ok": False, "error": "No valid items in order."}), 400
 
     now = utcnow()
@@ -1144,6 +1280,7 @@ def parts_api_orders_update(order_id: str):
             "$set": {
                 "vendor_id": vendor_oid,
                 "items": items,
+                "non_inventory_amounts": non_inventory_amounts,
                 "updated_at": now,
                 "updated_by": user_oid,
             }
