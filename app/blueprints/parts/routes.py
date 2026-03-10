@@ -186,6 +186,82 @@ def _parts_order_amounts(order_doc: dict):
     }
 
 
+def _sum_active_order_payments(payments_coll, order_id: ObjectId) -> float:
+    if payments_coll is None or not order_id:
+        return 0.0
+
+    pipeline = [
+        {
+            "$match": {
+                "parts_order_id": order_id,
+                "is_active": True,
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "amount_total": {"$sum": {"$ifNull": ["$amount", 0]}},
+            }
+        },
+    ]
+    rows = list(payments_coll.aggregate(pipeline))
+    if not rows:
+        return 0.0
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    return float(_parse_float(row.get("amount_total"), default=0.0))
+
+
+def _payment_status_from_amounts(total_amount: float, paid_amount: float) -> str:
+    total = float(_parse_float(total_amount, default=0.0))
+    paid = float(_parse_float(paid_amount, default=0.0))
+    if total <= 0:
+        return "paid"
+    if paid <= 0:
+        return "unpaid"
+    if paid + 0.01 >= total:
+        return "paid"
+    return "partially_paid"
+
+
+def _build_parts_order_payment_summary(order_doc: dict, paid_amount: float):
+    amounts = _parts_order_amounts(order_doc or {})
+    total_amount = float(_parse_float(amounts.get("total_amount"), default=0.0))
+    paid = max(0.0, float(_parse_float(paid_amount, default=0.0)))
+    remaining = max(0.0, float(total_amount - paid))
+    status = _payment_status_from_amounts(total_amount, paid)
+    return {
+        "total_amount": float(total_amount),
+        "paid_amount": float(paid),
+        "remaining_balance": float(remaining),
+        "payment_status": status,
+    }
+
+
+def _sync_parts_order_payment_state(orders_coll, payments_coll, order_doc: dict, user_oid, now):
+    if orders_coll is None or payments_coll is None or not isinstance(order_doc, dict):
+        return
+
+    order_id = order_doc.get("_id")
+    if not order_id:
+        return
+
+    paid_amount = _sum_active_order_payments(payments_coll, order_id)
+    summary = _build_parts_order_payment_summary(order_doc, paid_amount)
+
+    orders_coll.update_one(
+        {"_id": order_id},
+        {
+            "$set": {
+                "payment_status": summary["payment_status"],
+                "paid_amount": float(summary["paid_amount"]),
+                "remaining_balance": float(summary["remaining_balance"]),
+                "updated_at": now,
+                "updated_by": user_oid,
+            }
+        },
+    )
+
+
 def _get_parts_orders_totals(orders_coll, query: dict):
     totals = {
         "total": 0.0,
@@ -220,6 +296,35 @@ def _get_parts_orders_totals(orders_coll, query: dict):
         "tools": float(totals["tools"]),
         "utilities": float(totals["utilities"]),
         "another_service": float(totals["another_service"]),
+    }
+
+
+def _get_parts_orders_payment_totals(payments_coll, query: dict):
+    totals = {
+        "payments_total": 0.0,
+        "payments_count": 0,
+    }
+    if payments_coll is None:
+        return totals
+
+    pipeline = [
+        {"$match": query},
+        {
+            "$group": {
+                "_id": None,
+                "payments_total": {"$sum": {"$ifNull": ["$amount", 0]}},
+                "payments_count": {"$sum": 1},
+            }
+        },
+    ]
+    rows = list(payments_coll.aggregate(pipeline))
+    if not rows:
+        return totals
+
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    return {
+        "payments_total": float(_parse_float(row.get("payments_total"), default=0.0)),
+        "payments_count": int(_parse_int(row.get("payments_count"), default=0)),
     }
 
 
@@ -422,7 +527,7 @@ def parts_page():
         return redirect(url_for("dashboard.dashboard"))
 
     active_tab = (request.args.get("tab") or "parts").strip().lower()
-    if active_tab not in {"parts", "orders", "cores", "cores_returns"}:
+    if active_tab not in {"parts", "orders", "payments", "cores", "cores_returns"}:
         active_tab = "parts"
 
     q = (request.args.get("q") or "").strip()
@@ -453,6 +558,15 @@ def parts_page():
         page_key="cores_page",
         per_page_key="cores_per_page",
     )
+    payments_page_num, payments_per_page = get_pagination_params(
+        request.args,
+        default_per_page=20,
+        max_per_page=100,
+        page_key="payments_page",
+        per_page_key="payments_per_page",
+    )
+
+    payments_coll = orders_coll.database.parts_order_payments if orders_coll is not None else None
 
     vendor_ids_by_name = []
     if q and vendors_coll is not None:
@@ -620,16 +734,129 @@ def parts_page():
                 vendors_map[v.get("_id")] = _name_from_doc(v)
         
         for order in orders_rows:
+            paid_amount = _sum_active_order_payments(payments_coll, order.get("_id")) if payments_coll is not None else 0.0
+            payment_summary = _build_parts_order_payment_summary(order, paid_amount)
             amounts = _parts_order_amounts(order)
             orders_list.append({
                 "id": str(order.get("_id")),
                 "order_number": order.get("order_number"),
                 "vendor": vendors_map.get(order.get("vendor_id")) or "-",
                 "status": order.get("status") or "ordered",
+                "payment_status": payment_summary.get("payment_status") or "unpaid",
+                "paid_amount": float(payment_summary.get("paid_amount") or 0.0),
+                "remaining_balance": float(payment_summary.get("remaining_balance") or 0.0),
                 "items_count": len(order.get("items") or []),
                 "total_amount": amounts.get("total_amount") or 0.0,
                 "created_at": _fmt_dt_label(order.get("created_at")),
             })
+
+    # Payments tab list
+    payments_list = []
+    payments_pagination = None
+    payments_totals = {"payments_total": 0.0, "payments_count": 0}
+    if payments_coll is not None and orders_coll is not None:
+        payments_query = {"shop_id": shop["_id"], "is_active": True}
+
+        created_filter = {}
+        if date_filters["created_from"]:
+            created_filter["$gte"] = date_filters["created_from"]
+        if date_filters["created_to_exclusive"]:
+            created_filter["$lt"] = date_filters["created_to_exclusive"]
+        if created_filter:
+            payments_query["created_at"] = created_filter
+
+        payments_search_filter = build_regex_search_filter(
+            q,
+            text_fields=["payment_method", "notes"],
+            numeric_fields=["amount"],
+            object_id_fields=["_id", "parts_order_id", "shop_id", "created_by"],
+        )
+
+        if q:
+            order_base_query = {"shop_id": shop["_id"], "is_active": {"$ne": False}}
+            order_search_filter = build_regex_search_filter(
+                q,
+                text_fields=["status", "payment_status"],
+                numeric_fields=["order_number", "paid_amount", "remaining_balance"],
+                object_id_fields=["_id", "vendor_id", "shop_id", "tenant_id"],
+            )
+
+            if vendor_ids_by_name and order_search_filter:
+                order_query = {
+                    "$and": [
+                        order_base_query,
+                        {"$or": [order_search_filter, {"vendor_id": {"$in": vendor_ids_by_name}}]},
+                    ]
+                }
+            elif vendor_ids_by_name:
+                order_query = {"$and": [order_base_query, {"vendor_id": {"$in": vendor_ids_by_name}}]}
+            elif order_search_filter:
+                order_query = {"$and": [order_base_query, order_search_filter]}
+            else:
+                order_query = order_base_query
+
+            matched_order_ids = [
+                row.get("_id") for row in orders_coll.find(order_query, {"_id": 1}) if row.get("_id")
+            ]
+
+            extra = []
+            if matched_order_ids:
+                extra.append({"parts_order_id": {"$in": matched_order_ids}})
+
+            if payments_search_filter and extra:
+                payments_query = {"$and": [payments_query, {"$or": [payments_search_filter, *extra]}]}
+            elif payments_search_filter:
+                payments_query = {"$and": [payments_query, payments_search_filter]}
+            elif extra:
+                payments_query = {"$and": [payments_query, {"$or": extra}]}
+        elif payments_search_filter:
+            payments_query = {"$and": [payments_query, payments_search_filter]}
+
+        payments_totals = _get_parts_orders_payment_totals(payments_coll, payments_query)
+        payment_rows, payments_pagination = paginate_find(
+            payments_coll,
+            payments_query,
+            [("created_at", -1)],
+            payments_page_num,
+            payments_per_page,
+        )
+
+        order_ids = [x.get("parts_order_id") for x in payment_rows if x.get("parts_order_id")]
+        orders_map = {}
+        vendor_ids = []
+        if order_ids:
+            for row in orders_coll.find(
+                {"_id": {"$in": order_ids}, "shop_id": shop["_id"]},
+                {"order_number": 1, "vendor_id": 1, "status": 1},
+            ):
+                oid = row.get("_id")
+                if not oid:
+                    continue
+                orders_map[oid] = row
+                if row.get("vendor_id"):
+                    vendor_ids.append(row.get("vendor_id"))
+
+        vendors_map_for_payments = {}
+        if vendor_ids and vendors_coll is not None:
+            for row in vendors_coll.find({"_id": {"$in": vendor_ids}}):
+                vendors_map_for_payments[row.get("_id")] = _name_from_doc(row)
+
+        for pay in payment_rows:
+            order_row = orders_map.get(pay.get("parts_order_id")) or {}
+            vendor_name = vendors_map_for_payments.get(order_row.get("vendor_id")) or "-"
+            payments_list.append(
+                {
+                    "id": str(pay.get("_id")),
+                    "parts_order_id": str(pay.get("parts_order_id")) if pay.get("parts_order_id") else "",
+                    "order_number": order_row.get("order_number") or "-",
+                    "order_status": str(order_row.get("status") or "ordered"),
+                    "vendor": vendor_name,
+                    "amount": float(_parse_float(pay.get("amount"), default=0.0)),
+                    "payment_method": str(pay.get("payment_method") or "cash"),
+                    "notes": str(pay.get("notes") or ""),
+                    "created_at": _fmt_dt_label(pay.get("created_at")),
+                }
+            )
 
     # Get cores list for Cores tab
     cores_list = []
@@ -688,6 +915,9 @@ def parts_page():
         cores_pagination=cores_pagination,
         parts_totals=parts_totals,
         orders_totals=orders_totals,
+        payments=payments_list,
+        payments_pagination=payments_pagination,
+        payments_totals=payments_totals,
         date_preset=date_preset,
         date_from=date_from,
         date_to=date_to,
@@ -1095,6 +1325,9 @@ def parts_api_orders_create():
         "items": items,
         "non_inventory_amounts": non_inventory_amounts,
         "status": "ordered",
+        "payment_status": "unpaid",
+        "paid_amount": 0.0,
+        "remaining_balance": float(_parts_order_amounts({"items": items, "non_inventory_amounts": non_inventory_amounts}).get("total_amount") or 0.0),
         "is_active": True,
         "created_at": now,
         "updated_at": now,
@@ -1190,6 +1423,10 @@ def parts_api_orders_get(order_id: str):
                 "core_cost": float(part_data.get("core_cost") or 0.0),
             })
 
+    payments_coll = orders_coll.database.parts_order_payments
+    paid_amount = _sum_active_order_payments(payments_coll, oid)
+    payment_summary = _build_parts_order_payment_summary(order, paid_amount)
+
     return jsonify({
         "ok": True,
         "order": {
@@ -1206,6 +1443,7 @@ def parts_api_orders_get(order_id: str):
                 for x in (order.get("non_inventory_amounts") or [])
                 if isinstance(x, dict)
             ],
+            "payment_summary": payment_summary,
             "created_at": _fmt_dt_iso(order.get("created_at")),
         }
     })
@@ -1284,6 +1522,15 @@ def parts_api_orders_update(order_id: str):
     if not items and not non_inventory_amounts:
         return jsonify({"ok": False, "error": "No valid items in order."}), 400
 
+    payments_coll = orders_coll.database.parts_order_payments
+    already_paid_amount = _sum_active_order_payments(payments_coll, oid)
+    next_total_amount = _parts_order_amounts({"items": items, "non_inventory_amounts": non_inventory_amounts}).get("total_amount") or 0.0
+    if float(already_paid_amount) - float(next_total_amount) > 0.01:
+        return jsonify({
+            "ok": False,
+            "error": "Paid amount is greater than updated order total. Increase order total or remove payment first.",
+        }), 400
+
     now = utcnow()
     user_oid = _oid(session.get(SESSION_USER_ID))
 
@@ -1301,7 +1548,130 @@ def parts_api_orders_update(order_id: str):
         }
     )
 
+    updated_order = orders_coll.find_one({"_id": oid})
+    _sync_parts_order_payment_state(orders_coll, payments_coll, updated_order or {}, user_oid, now)
+
     return jsonify({"ok": True})
+
+
+@parts_bp.post("/api/orders/<order_id>/payment")
+@login_required
+@permission_required("parts.edit")
+def parts_api_orders_payment(order_id: str):
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if orders_coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop database not configured for this shop."}), 400
+
+    oid = _oid(order_id)
+    if not oid:
+        return jsonify({"ok": False, "error": "Invalid order id."}), 400
+
+    order = orders_coll.find_one({"_id": oid, "shop_id": shop["_id"], "is_active": {"$ne": False}})
+    if not order:
+        return jsonify({"ok": False, "error": "Order not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    amount = _parse_float(data.get("amount"), default=-1.0)
+    payment_method = str(data.get("payment_method") or "").strip() or "cash"
+    notes = str(data.get("notes") or "").strip()
+
+    if amount <= 0:
+        return jsonify({"ok": False, "error": "invalid_amount"}), 400
+
+    payments_coll = orders_coll.database.parts_order_payments
+    paid_amount = _sum_active_order_payments(payments_coll, oid)
+    summary = _build_parts_order_payment_summary(order, paid_amount)
+    total_amount = float(summary.get("total_amount") or 0.0)
+
+    next_paid_amount = float(paid_amount + amount)
+    if next_paid_amount - total_amount > 0.01:
+        return jsonify({
+            "ok": False,
+            "error": "overpayment",
+            "message": f"Payment would exceed invoice total. Current balance: ${max(0.0, total_amount - paid_amount):.2f}",
+        }), 400
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    doc = {
+        "parts_order_id": oid,
+        "shop_id": shop["_id"],
+        "tenant_id": shop.get("tenant_id"),
+        "amount": float(round(amount + 1e-12, 2)),
+        "payment_method": payment_method,
+        "notes": notes,
+        "is_active": True,
+        "created_at": now,
+        "created_by": user_oid,
+    }
+    result = payments_coll.insert_one(doc)
+
+    refreshed_order = orders_coll.find_one({"_id": oid})
+    _sync_parts_order_payment_state(orders_coll, payments_coll, refreshed_order or {}, user_oid, now)
+
+    refreshed_paid_amount = _sum_active_order_payments(payments_coll, oid)
+    refreshed_summary = _build_parts_order_payment_summary(refreshed_order or order, refreshed_paid_amount)
+
+    return jsonify(
+        {
+            "ok": True,
+            "payment_id": str(result.inserted_id),
+            "amount_paid": float(refreshed_summary.get("paid_amount") or 0.0),
+            "remaining_balance": float(refreshed_summary.get("remaining_balance") or 0.0),
+            "payment_status": refreshed_summary.get("payment_status") or "unpaid",
+            "is_fully_paid": (refreshed_summary.get("payment_status") == "paid"),
+        }
+    )
+
+
+@parts_bp.get("/api/orders/<order_id>/payments")
+@login_required
+@permission_required("parts.view")
+def parts_api_orders_payments(order_id: str):
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if orders_coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop database not configured for this shop."}), 400
+
+    oid = _oid(order_id)
+    if not oid:
+        return jsonify({"ok": False, "error": "Invalid order id."}), 400
+
+    order = orders_coll.find_one({"_id": oid, "shop_id": shop["_id"], "is_active": {"$ne": False}})
+    if not order:
+        return jsonify({"ok": False, "error": "Order not found."}), 404
+
+    payments_coll = orders_coll.database.parts_order_payments
+    payments = list(
+        payments_coll.find({"parts_order_id": oid, "is_active": True}).sort([("created_at", -1)])
+    )
+
+    paid_amount = _sum_active_order_payments(payments_coll, oid)
+    summary = _build_parts_order_payment_summary(order, paid_amount)
+
+    payment_list = [
+        {
+            "id": str(p.get("_id")),
+            "amount": float(_parse_float(p.get("amount"), default=0.0)),
+            "payment_method": str(p.get("payment_method") or "cash"),
+            "notes": str(p.get("notes") or ""),
+            "created_at": _fmt_dt_iso(p.get("created_at")),
+        }
+        for p in payments
+    ]
+
+    return jsonify(
+        {
+            "ok": True,
+            "order_id": str(order.get("_id")),
+            "order_number": order.get("order_number"),
+            "grand_total": float(summary.get("total_amount") or 0.0),
+            "paid_amount": float(summary.get("paid_amount") or 0.0),
+            "remaining_balance": float(summary.get("remaining_balance") or 0.0),
+            "payment_status": summary.get("payment_status") or "unpaid",
+            "payments": payment_list,
+        }
+    )
 
 
 @parts_bp.post("/api/orders/<order_id>/receive")
@@ -1541,6 +1911,18 @@ def parts_api_orders_delete(order_id: str):
                 "is_active": False,
                 "deleted_at": now,
                 "deleted_by": user_oid,
+                "updated_at": now,
+                "updated_by": user_oid,
+            }
+        },
+    )
+
+    payments_coll = orders_coll.database.parts_order_payments
+    payments_coll.update_many(
+        {"parts_order_id": oid, "is_active": True},
+        {
+            "$set": {
+                "is_active": False,
                 "updated_at": now,
                 "updated_by": user_oid,
             }

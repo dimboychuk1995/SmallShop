@@ -264,6 +264,102 @@
 			vendorDropdown.innerHTML = "";
 		}
 
+		function formatMoney(value) {
+			const x = Number(value || 0);
+			return `$${Number.isFinite(x) ? x.toFixed(2) : "0.00"}`;
+		}
+
+		const partsOrderPaymentModalEl = document.getElementById("partsOrderPaymentModal");
+		const partsOrderPaymentOrderIdInput = document.getElementById("partsOrderPaymentOrderId");
+		const partsOrderPaymentOrderMeta = document.getElementById("partsOrderPaymentOrderMeta");
+		const partsOrderPaymentInvoiceTotal = document.getElementById("partsOrderPaymentInvoiceTotal");
+		const partsOrderPaymentAlreadyPaid = document.getElementById("partsOrderPaymentAlreadyPaid");
+		const partsOrderPaymentRemainingBalance = document.getElementById("partsOrderPaymentRemainingBalance");
+		const partsOrderPaymentAmountInput = document.getElementById("partsOrderPaymentAmountInput");
+		const partsOrderPaymentMethodInput = document.getElementById("partsOrderPaymentMethodInput");
+		const partsOrderPaymentNotesInput = document.getElementById("partsOrderPaymentNotesInput");
+		const partsOrderPaymentSubmitBtn = document.getElementById("partsOrderPaymentSubmitBtn");
+
+		async function loadPartsOrderPaymentSummary(orderId) {
+			const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/payments`, {
+				method: "GET",
+				headers: { "Accept": "application/json" },
+			});
+			const data = await res.json();
+			if (!res.ok || !data || !data.ok) {
+				throw new Error((data && (data.error || data.message)) || "Failed to load payment summary");
+			}
+			return data;
+		}
+
+		document.addEventListener("click", async function (e) {
+			const btn = e.target.closest(".js-order-payment");
+			if (!btn) return;
+
+			const orderId = String(btn.getAttribute("data-order-id") || "").trim();
+			if (!orderId) return;
+
+			try {
+				const data = await loadPartsOrderPaymentSummary(orderId);
+				partsOrderPaymentOrderIdInput.value = orderId;
+				partsOrderPaymentOrderMeta.textContent = `Order #${data.order_number || "-"}`;
+				partsOrderPaymentInvoiceTotal.textContent = formatMoney(data.grand_total || 0);
+				partsOrderPaymentAlreadyPaid.textContent = formatMoney(data.paid_amount || 0);
+				partsOrderPaymentRemainingBalance.textContent = formatMoney(data.remaining_balance || 0);
+				partsOrderPaymentAmountInput.value = (Number(data.remaining_balance || 0) > 0)
+					? Number(data.remaining_balance).toFixed(2)
+					: "";
+				partsOrderPaymentMethodInput.value = "cash";
+				partsOrderPaymentNotesInput.value = "";
+
+				if (partsOrderPaymentModalEl) {
+					const modal = new bootstrap.Modal(partsOrderPaymentModalEl);
+					modal.show();
+				}
+			} catch (err) {
+				alert(err.message || "Failed to open payment modal");
+			}
+		});
+
+		partsOrderPaymentSubmitBtn?.addEventListener("click", async function () {
+			const orderId = String(partsOrderPaymentOrderIdInput?.value || "").trim();
+			if (!orderId) return;
+
+			const amount = parseFloat(partsOrderPaymentAmountInput?.value || "0");
+			if (!(amount > 0)) {
+				alert("Enter valid payment amount.");
+				return;
+			}
+
+			const method = String(partsOrderPaymentMethodInput?.value || "cash").trim() || "cash";
+			const notes = String(partsOrderPaymentNotesInput?.value || "").trim();
+
+			const originalText = partsOrderPaymentSubmitBtn.textContent;
+			partsOrderPaymentSubmitBtn.disabled = true;
+			partsOrderPaymentSubmitBtn.textContent = "Saving...";
+
+			try {
+				const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/payment`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json", "Accept": "application/json" },
+					body: JSON.stringify({ amount, payment_method: method, notes }),
+				});
+				const data = await res.json();
+				if (!res.ok || !data || !data.ok) {
+					throw new Error((data && (data.message || data.error)) || "Failed to save payment");
+				}
+
+				const modal = bootstrap.Modal.getInstance(partsOrderPaymentModalEl);
+				if (modal) modal.hide();
+				location.reload();
+			} catch (err) {
+				alert(err.message || "Failed to save payment");
+			} finally {
+				partsOrderPaymentSubmitBtn.disabled = false;
+				partsOrderPaymentSubmitBtn.textContent = originalText;
+			}
+		});
+
 		function showVendorDropdown() {
 			vendorDropdown.style.display = "block";
 		}

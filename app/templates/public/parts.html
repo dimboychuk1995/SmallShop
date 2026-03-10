@@ -36,6 +36,11 @@
       </a>
     </li>
     <li class="nav-item" role="presentation">
+      <a class="nav-link {% if active_tab == 'payments' %}active{% endif %}" id="tab-payments" href="{{ url_for('parts.parts_page', tab='payments', q=q) }}" role="tab" aria-controls="content-payments" aria-selected="{{ 'true' if active_tab == 'payments' else 'false' }}">
+        Parts Orders Payments
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
       <a class="nav-link {% if active_tab == 'cores' %}active{% endif %}" id="tab-cores" href="{{ url_for('parts.parts_page', tab='cores', q=q) }}" role="tab" aria-controls="content-cores" aria-selected="{{ 'true' if active_tab == 'cores' else 'false' }}">
         Cores
       </a>
@@ -242,6 +247,9 @@
                   <th>Vendor</th>
                   <th class="text-end">Items</th>
                   <th class="text-end">Total</th>
+                  <th class="text-end">Paid</th>
+                  <th class="text-end">Balance</th>
+                  <th>Invoice</th>
                   <th>Status</th>
                   <th>Created</th>
                   <th class="text-end">Actions</th>
@@ -254,6 +262,17 @@
                     <td>{{ o.vendor }}</td>
                     <td class="text-end">{{ o.items_count }}</td>
                     <td class="text-end fw-semibold">${{ "%.2f"|format(o.total_amount or 0) }}</td>
+                    <td class="text-end">${{ "%.2f"|format(o.paid_amount or 0) }}</td>
+                    <td class="text-end">${{ "%.2f"|format(o.remaining_balance or 0) }}</td>
+                    <td>
+                      {% if o.payment_status == 'paid' %}
+                        <span class="badge bg-success">Paid</span>
+                      {% elif o.payment_status == 'partially_paid' %}
+                        <span class="badge bg-warning text-dark">Partially Paid</span>
+                      {% else %}
+                        <span class="badge bg-secondary">Unpaid</span>
+                      {% endif %}
+                    </td>
                     <td>
                       {% if o.status == 'received' %}
                         <span class="badge bg-success">{{ o.status or 'ordered' }}</span>
@@ -267,6 +286,11 @@
                     </td>
                     <td>{{ o.created_at }}</td>
                     <td class="text-end">
+                      <button type="button" class="btn btn-sm btn-outline-success js-order-payment"
+                              data-order-id="{{ o.id }}" data-order-number="{{ o.order_number or '-' }}"
+                              title="Record payment">
+                        <i class="bi bi-cash-coin me-1"></i> Pay
+                      </button>
                       <button type="button" class="btn btn-sm btn-outline-primary editOrderBtn" 
                               data-order-id="{{ o.id }}"
                               data-bs-toggle="modal" data-bs-target="#orderModal">
@@ -311,6 +335,114 @@
           {% endif %}
         {% else %}
           <div class="text-muted">No parts orders found.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Parts Orders Payments Tab -->
+  <div class="tab-pane {% if active_tab == 'payments' %}show active{% endif %}" id="content-payments" role="tabpanel" aria-labelledby="tab-payments">
+    <div class="card">
+      <div class="card-body">
+        <form method="get" class="row g-2 align-items-center mb-3 wo-filter-form">
+          <input type="hidden" name="tab" value="payments" />
+          <div class="col-12 col-md-8 col-lg-6">
+            <input type="text" name="q" class="form-control form-control-sm" placeholder="Search payments by any field..." value="{{ q or '' }}" />
+          </div>
+          <div class="col-12">
+            <div class="row g-2 align-items-center wo-date-row">
+              <div class="col-12 col-md-4 col-lg-3">
+                <select name="date_preset" class="form-select form-select-sm date-preset-select" aria-label="Parts order payments date range preset">
+                  <option value="today" {% if date_preset == 'today' %}selected{% endif %}>Today</option>
+                  <option value="yesterday" {% if date_preset == 'yesterday' %}selected{% endif %}>Yesterday</option>
+                  <option value="this_week" {% if (date_preset or 'this_week') == 'this_week' %}selected{% endif %}>This Week</option>
+                  <option value="last_week" {% if date_preset == 'last_week' %}selected{% endif %}>Last Week</option>
+                  <option value="this_month" {% if date_preset == 'this_month' %}selected{% endif %}>This Month</option>
+                  <option value="last_month" {% if date_preset == 'last_month' %}selected{% endif %}>Last Month</option>
+                  <option value="this_quarter" {% if date_preset == 'this_quarter' %}selected{% endif %}>This Quarter</option>
+                  <option value="last_quarter" {% if date_preset == 'last_quarter' %}selected{% endif %}>Last Quarter</option>
+                  <option value="this_year" {% if date_preset == 'this_year' %}selected{% endif %}>This Year</option>
+                  <option value="last_year" {% if date_preset == 'last_year' %}selected{% endif %}>Last Year</option>
+                  <option value="all_time" {% if date_preset == 'all_time' %}selected{% endif %}>All Time</option>
+                  <option value="custom" {% if date_preset == 'custom' %}selected{% endif %}>Custom Range</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-6 col-lg-5">
+                <div class="input-group input-group-sm date-range-group" aria-label="Parts order payments date range">
+                  <span class="input-group-text">From</span>
+                  <input type="date" name="date_from" class="form-control date-filter-input" value="{{ date_from or '' }}" aria-label="Parts order payments start date" />
+                  <span class="input-group-text">To</span>
+                  <input type="date" name="date_to" class="form-control date-filter-input" value="{{ date_to or '' }}" aria-label="Parts order payments end date" />
+                </div>
+              </div>
+              <div class="col-12 col-md-2 col-lg d-flex align-items-center justify-content-lg-end justify-content-center wo-reset-wrap">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('parts.parts_page', tab='payments') }}">Reset</a>
+              </div>
+            </div>
+          </div>
+        </form>
+
+        {% if payments and payments|length > 0 %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Vendor</th>
+                  <th>Order Status</th>
+                  <th class="text-end">Amount</th>
+                  <th>Method</th>
+                  <th>Date</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in payments %}
+                  <tr>
+                    <td><span class="badge bg-secondary">{{ p.order_number or '-' }}</span></td>
+                    <td>{{ p.vendor or '-' }}</td>
+                    <td>
+                      {% if p.order_status == 'received' %}
+                        <span class="badge bg-success">{{ p.order_status }}</span>
+                      {% else %}
+                        <span class="badge bg-warning text-dark">{{ p.order_status or 'ordered' }}</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-end fw-semibold">${{ "%.2f"|format(p.amount or 0) }}</td>
+                    <td><span class="badge bg-secondary text-uppercase">{{ p.payment_method or 'cash' }}</span></td>
+                    <td>{{ p.created_at }}</td>
+                    <td>{{ p.notes if p.notes else '-' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          {% if payments_pagination %}
+            <div class="wo-pagination-row mt-3">
+              <div class="small text-muted wo-pagination-meta">
+                Page {{ payments_pagination.page }} of {{ payments_pagination.pages }} · {{ payments_pagination.total }} total
+              </div>
+              <div class="wo-totals-center wo-pagination-totals">
+                <div class="wo-totals-box">
+                  <span>Payments Count: <strong>{{ (payments_totals or {}).get('payments_count', 0) }}</strong></span>
+                  <span>Payments Total: <strong>${{ "%.2f"|format((payments_totals or {}).get('payments_total', 0)) }}</strong></span>
+                </div>
+              </div>
+              {% if payments_pagination.pages > 1 %}
+                <div class="btn-group btn-group-sm wo-pagination-actions" role="group" aria-label="Parts order payments pagination">
+                  <a class="btn btn-outline-secondary {% if not payments_pagination.has_prev %}disabled{% endif %}"
+                    href="{{ url_for('parts.parts_page', tab='payments', q=q, date_preset=date_preset, date_from=date_from, date_to=date_to, payments_page=payments_pagination.prev_page, payments_per_page=payments_pagination.per_page) }}">Prev</a>
+                  <a class="btn btn-outline-secondary {% if not payments_pagination.has_next %}disabled{% endif %}"
+                    href="{{ url_for('parts.parts_page', tab='payments', q=q, date_preset=date_preset, date_from=date_from, date_to=date_to, payments_page=payments_pagination.next_page, payments_per_page=payments_pagination.per_page) }}">Next</a>
+                </div>
+              {% else %}
+                <div class="wo-pagination-actions"></div>
+              {% endif %}
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="text-muted">No payments recorded yet.</div>
         {% endif %}
       </div>
     </div>
@@ -420,6 +552,58 @@
           </div>
         </form>
         <div class="text-muted">Cores Returns tab is empty for now.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Parts Order Payment Modal -->
+<div class="modal fade" id="partsOrderPaymentModal" tabindex="-1" aria-labelledby="partsOrderPaymentModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="partsOrderPaymentModalLabel">Record parts order payment</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="partsOrderPaymentOrderId" value="">
+        <div class="small text-muted mb-2" id="partsOrderPaymentOrderMeta">Order # -</div>
+        <div class="row g-2 mb-3">
+          <div class="col-4">
+            <div class="small text-muted">Invoice</div>
+            <div class="fw-semibold" id="partsOrderPaymentInvoiceTotal">$0.00</div>
+          </div>
+          <div class="col-4">
+            <div class="small text-muted">Paid</div>
+            <div class="fw-semibold" id="partsOrderPaymentAlreadyPaid">$0.00</div>
+          </div>
+          <div class="col-4">
+            <div class="small text-muted">Balance</div>
+            <div class="fw-semibold" id="partsOrderPaymentRemainingBalance">$0.00</div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Amount</label>
+          <input id="partsOrderPaymentAmountInput" type="number" class="form-control" min="0.01" step="0.01" placeholder="0.00">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Method</label>
+          <select id="partsOrderPaymentMethodInput" class="form-select">
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="bank_transfer">Bank transfer</option>
+            <option value="check">Check</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Notes</label>
+          <textarea id="partsOrderPaymentNotesInput" class="form-control" rows="2" placeholder="Optional"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="partsOrderPaymentSubmitBtn">Save Payment</button>
       </div>
     </div>
   </div>
@@ -768,6 +952,6 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/parts/parts.js', v='20260309-no-core-for-not-tracked') }}"></script>
+<script src="{{ url_for('static', filename='js/parts/parts.js', v='20260309-parts-order-payments') }}"></script>
 
 {% endblock %}
