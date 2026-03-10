@@ -998,7 +998,8 @@
       const chargesText = (coreCost > 0 || miscCost > 0)
         ? ` • Charges: core $${money(coreCost)}${miscCost > 0 ? `, misc $${money(miscCost)}` : ""}`
         : "";
-      const meta = `Stock: ${it.in_stock ?? 0} • Avg cost: $${money(toNum(it.average_cost) ?? 0)}${chargesText}`;
+      const trackingText = it.do_not_track_inventory ? " • Not tracked" : "";
+      const meta = `Stock: ${it.in_stock ?? 0} • Avg cost: $${money(toNum(it.average_cost) ?? 0)}${trackingText}${chargesText}`;
       return `
         <div class="parts-dd-item" data-idx="${idx}"
              style="padding:10px 12px; cursor:pointer; border-bottom:1px solid rgba(0,0,0,.06);">

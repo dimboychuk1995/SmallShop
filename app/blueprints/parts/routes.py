@@ -21,6 +21,7 @@ from . import parts_bp
 NON_INVENTORY_AMOUNT_TYPES = {
     "shop_supply",
     "tools",
+    "utilities",
     "payment_to_another_service",
 }
 
@@ -189,6 +190,7 @@ def _get_parts_orders_totals(orders_coll, query: dict):
         "total": 0.0,
         "shop_supply": 0.0,
         "tools": 0.0,
+        "utilities": 0.0,
         "another_service": 0.0,
     }
 
@@ -206,6 +208,8 @@ def _get_parts_orders_totals(orders_coll, query: dict):
                 totals["shop_supply"] += amount
             elif line_type == "tools":
                 totals["tools"] += amount
+            elif line_type == "utilities":
+                totals["utilities"] += amount
             elif line_type == "payment_to_another_service":
                 totals["another_service"] += amount
 
@@ -213,6 +217,7 @@ def _get_parts_orders_totals(orders_coll, query: dict):
         "total": float(totals["total"]),
         "shop_supply": float(totals["shop_supply"]),
         "tools": float(totals["tools"]),
+        "utilities": float(totals["utilities"]),
         "another_service": float(totals["another_service"]),
     }
 
@@ -568,6 +573,7 @@ def parts_page():
         "total": 0.0,
         "shop_supply": 0.0,
         "tools": 0.0,
+        "utilities": 0.0,
         "another_service": 0.0,
     }
     if orders_coll is not None:
@@ -731,15 +737,13 @@ def parts_create():
     core_has_charge_raw = (request.form.get("core_has_charge") or "").strip()
     core_cost_raw = (request.form.get("core_cost") or "").strip()
     misc_has_charge_raw = (request.form.get("misc_has_charge") or "").strip()
+    do_not_track_inventory_raw = (request.form.get("do_not_track_inventory") or "").strip()
 
     if not part_number:
         flash("Part number is required.", "error")
         return redirect(url_for("parts.parts_page"))
 
     in_stock = _parse_int(in_stock_raw, default=0)
-    if in_stock < 0:
-        flash("In stock cannot be negative.", "error")
-        return redirect(url_for("parts.parts_page"))
 
     average_cost = _parse_float(avg_cost_raw, default=0.0)
     if average_cost < 0:
@@ -753,6 +757,16 @@ def parts_create():
         return redirect(url_for("parts.parts_page"))
 
     misc_has_charge = misc_has_charge_raw == "1"
+    do_not_track_inventory = do_not_track_inventory_raw == "1"
+
+    if not do_not_track_inventory and in_stock < 0:
+        flash("In stock cannot be negative.", "error")
+        return redirect(url_for("parts.parts_page"))
+
+    # Do-not-track parts cannot have core charge.
+    if do_not_track_inventory:
+        core_has_charge = False
+        core_cost = 0.0
     misc_charges = []
     if misc_has_charge:
         import re
@@ -832,7 +846,7 @@ def parts_create():
         "category_id": category_oid,
         "location_id": location_oid,
 
-        "in_stock": in_stock,
+        "do_not_track_inventory": bool(do_not_track_inventory),
         "average_cost": float(average_cost),
         "core_has_charge": bool(core_has_charge),
         "core_cost": float(core_cost) if core_has_charge else None,
@@ -851,6 +865,9 @@ def parts_create():
         "shop_id": shop["_id"],
         "tenant_id": tenant_oid,
     }
+
+    if not do_not_track_inventory:
+        doc["in_stock"] = in_stock
 
     parts_coll.insert_one(doc)
 
@@ -1324,6 +1341,7 @@ def parts_api_orders_receive(order_id: str):
     user_oid = _oid(session.get(SESSION_USER_ID))
 
     updated = 0
+    skipped_not_tracked = 0
     for it in items:
         pid = it.get("part_id")
         if not pid:
@@ -1339,6 +1357,10 @@ def parts_api_orders_receive(order_id: str):
 
         part = parts_coll.find_one({"_id": pid})
         if not part or part.get("is_active") is False:
+            continue
+
+        if bool(part.get("do_not_track_inventory")):
+            skipped_not_tracked += 1
             continue
 
         old_qty = int(part.get("in_stock") or 0)
@@ -1368,6 +1390,164 @@ def parts_api_orders_receive(order_id: str):
             "updated_at": now,
             "updated_by": user_oid,
         }},
+    )
+
+    return jsonify({
+        "ok": True,
+        "updated_parts": updated,
+        "skipped_not_tracked": skipped_not_tracked,
+    })
+
+
+def _rollback_received_order_inventory(parts_coll, items, user_oid, now):
+    """Rollback stock quantities for received order items (without touching avg cost)."""
+    if not isinstance(items, list):
+        return 0, []
+
+    errors = []
+    updates = []
+
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+
+        pid = it.get("part_id")
+        qty = _parse_int(it.get("quantity"), default=0)
+        part_number = str(it.get("part_number") or "").strip()
+
+        if not pid or qty <= 0:
+            continue
+
+        part = parts_coll.find_one({"_id": pid, "is_active": True}, {"in_stock": 1, "do_not_track_inventory": 1})
+        if not part:
+            continue
+
+        if bool(part.get("do_not_track_inventory")):
+            continue
+
+        current_qty = int(part.get("in_stock") or 0)
+        if current_qty < qty:
+            label = part_number or str(pid)
+            errors.append(f"Cannot rollback '{label}': need {qty}, have {current_qty} in stock")
+            continue
+
+        updates.append({
+            "part_id": pid,
+            "new_qty": current_qty - qty,
+        })
+
+    if errors:
+        return 0, errors
+
+    updated = 0
+    for upd in updates:
+        parts_coll.update_one(
+            {"_id": upd["part_id"]},
+            {
+                "$set": {
+                    "in_stock": int(upd["new_qty"]),
+                    "updated_at": now,
+                    "updated_by": user_oid,
+                }
+            },
+        )
+        updated += 1
+
+    return updated, []
+
+
+@parts_bp.post("/api/orders/<order_id>/unreceive")
+@login_required
+@permission_required("parts.edit")
+def parts_api_orders_unreceive(order_id: str):
+    """AJAX unreceive order and rollback inventory quantities for tracked parts."""
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if parts_coll is None or orders_coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop database not configured for this shop."}), 400
+
+    oid = _oid(order_id)
+    if not oid:
+        return jsonify({"ok": False, "error": "Invalid order id."}), 400
+
+    order = orders_coll.find_one({"_id": oid, "shop_id": shop["_id"], "is_active": {"$ne": False}})
+    if not order:
+        return jsonify({"ok": False, "error": "Order not found."}), 404
+
+    if order.get("status") != "received":
+        return jsonify({"ok": True, "updated_parts": 0, "message": "Order is not received."})
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+
+    updated, rollback_errors = _rollback_received_order_inventory(
+        parts_coll,
+        order.get("items") or [],
+        user_oid,
+        now,
+    )
+    if rollback_errors:
+        return jsonify({"ok": False, "error": rollback_errors[0], "details": rollback_errors}), 400
+
+    orders_coll.update_one(
+        {"_id": oid},
+        {
+            "$set": {
+                "status": "ordered",
+                "updated_at": now,
+                "updated_by": user_oid,
+            },
+            "$unset": {
+                "received_at": "",
+                "received_by": "",
+            },
+        },
+    )
+
+    return jsonify({"ok": True, "updated_parts": updated})
+
+
+@parts_bp.route("/api/orders/<order_id>", methods=["DELETE"])
+@login_required
+@permission_required("parts.edit")
+def parts_api_orders_delete(order_id: str):
+    """Delete (soft-delete) parts order. If received, rollback tracked inventory quantities."""
+    parts_coll, vendors_coll, cats_coll, locs_coll, orders_coll, shop, master = _parts_collections()
+    if parts_coll is None or orders_coll is None or shop is None:
+        return jsonify({"ok": False, "error": "Shop database not configured for this shop."}), 400
+
+    oid = _oid(order_id)
+    if not oid:
+        return jsonify({"ok": False, "error": "Invalid order id."}), 400
+
+    order = orders_coll.find_one({"_id": oid, "shop_id": shop["_id"], "is_active": {"$ne": False}})
+    if not order:
+        return jsonify({"ok": False, "error": "Order not found."}), 404
+
+    now = utcnow()
+    user_oid = _oid(session.get(SESSION_USER_ID))
+    updated = 0
+
+    if order.get("status") == "received":
+        updated, rollback_errors = _rollback_received_order_inventory(
+            parts_coll,
+            order.get("items") or [],
+            user_oid,
+            now,
+        )
+        if rollback_errors:
+            return jsonify({"ok": False, "error": rollback_errors[0], "details": rollback_errors}), 400
+
+    orders_coll.update_one(
+        {"_id": oid},
+        {
+            "$set": {
+                "is_active": False,
+                "deleted_at": now,
+                "deleted_by": user_oid,
+                "updated_at": now,
+                "updated_by": user_oid,
+            }
+        },
     )
 
     return jsonify({"ok": True, "updated_parts": updated})
@@ -1405,6 +1585,7 @@ def parts_api_get(part_id: str):
             "category_id": str(part["category_id"]) if part.get("category_id") else "",
             "location_id": str(part["location_id"]) if part.get("location_id") else "",
             "in_stock": int(part.get("in_stock") or 0),
+            "do_not_track_inventory": bool(part.get("do_not_track_inventory")),
             "average_cost": float(part.get("average_cost") or 0.0),
             "core_has_charge": bool(part.get("core_has_charge", False)),
             "core_cost": float(part.get("core_cost") or 0.0),
@@ -1596,18 +1777,23 @@ def parts_api_update(part_id: str):
     description = (data.get("description") or "").strip()
     reference = (data.get("reference") or "").strip()
 
-    in_stock = _parse_int(data.get("in_stock", 0), default=0)
-    if in_stock < 0:
-        return jsonify({"ok": False, "error": "In stock cannot be negative"}), 400
-
     average_cost = _parse_float(data.get("average_cost", 0.0), default=0.0)
     if average_cost < 0:
         return jsonify({"ok": False, "error": "Average cost cannot be negative"}), 400
+
+    do_not_track_inventory = bool(data.get("do_not_track_inventory", False))
+    in_stock = _parse_int(data.get("in_stock", 0), default=0)
+    if not do_not_track_inventory and in_stock < 0:
+        return jsonify({"ok": False, "error": "In stock cannot be negative"}), 400
 
     core_has_charge = data.get("core_has_charge", False)
     core_cost = _parse_float(data.get("core_cost", 0.0), default=0.0)
     if core_has_charge and core_cost < 0:
         return jsonify({"ok": False, "error": "Core cost cannot be negative"}), 400
+
+    if do_not_track_inventory:
+        core_has_charge = False
+        core_cost = 0.0
 
     misc_has_charge = data.get("misc_has_charge", False)
     misc_charges = data.get("misc_charges", []) or []
@@ -1643,9 +1829,7 @@ def parts_api_update(part_id: str):
     now = utcnow()
     user_oid = _oid(session.get(SESSION_USER_ID))
 
-    parts_coll.update_one(
-        {"_id": pid},
-        {"$set": {
+    set_doc = {
             "part_number": part_number,
             "description": description or None,
             "reference": reference or None,
@@ -1653,7 +1837,7 @@ def parts_api_update(part_id: str):
             "vendor_id": vendor_oid,
             "category_id": category_oid,
             "location_id": location_oid,
-            "in_stock": in_stock,
+            "do_not_track_inventory": bool(do_not_track_inventory),
             "average_cost": float(average_cost),
             "core_has_charge": bool(core_has_charge),
             "core_cost": float(core_cost) if core_has_charge else None,
@@ -1661,8 +1845,19 @@ def parts_api_update(part_id: str):
             "misc_charges": misc_charges if misc_has_charge else [],
             "updated_at": now,
             "updated_by": user_oid,
-        }}
-    )
+    }
+    unset_doc = {}
+
+    if do_not_track_inventory:
+        unset_doc["in_stock"] = ""
+    else:
+        set_doc["in_stock"] = in_stock
+
+    update_doc = {"$set": set_doc}
+    if unset_doc:
+        update_doc["$unset"] = unset_doc
+
+    parts_coll.update_one({"_id": pid}, update_doc)
 
     return jsonify({"ok": True, "message": "Part updated successfully"})
 

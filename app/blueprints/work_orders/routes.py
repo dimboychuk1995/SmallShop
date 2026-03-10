@@ -137,6 +137,83 @@ def normalize_parts_payload(raw_parts):
     return out
 
 
+def _resolve_part_for_inventory(shop_db, raw_part: dict):
+    """Resolve part document by part_id first, then by part_number."""
+    if not isinstance(raw_part, dict):
+        return None
+
+    part_id = oid(raw_part.get("part_id"))
+    part_number = str(raw_part.get("part_number") or "").strip()
+
+    query = {"is_active": True}
+    if part_id:
+        query["_id"] = part_id
+    elif part_number:
+        query["part_number"] = part_number
+    else:
+        return None
+
+    return shop_db.parts.find_one(
+        query,
+        {
+            "_id": 1,
+            "part_number": 1,
+            "in_stock": 1,
+            "do_not_track_inventory": 1,
+        },
+    )
+
+
+def _collect_inventory_qty_by_part(shop_db, labors: list):
+    """Collect tracked parts qty from labor blocks as {part_id: {part_number, qty}}."""
+    out = {}
+    errors = []
+
+    if not isinstance(labors, list):
+        return out, errors
+
+    for labor_block in labors:
+        if not isinstance(labor_block, dict):
+            continue
+
+        parts = labor_block.get("parts") or []
+        if not isinstance(parts, list):
+            continue
+
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+
+            qty = i32(part.get("qty"))
+            if qty is None or qty <= 0:
+                continue
+
+            part_doc = _resolve_part_for_inventory(shop_db, part)
+            raw_part_number = str(part.get("part_number") or "").strip()
+            if not part_doc:
+                if raw_part_number:
+                    errors.append(f"Part '{raw_part_number}' not found in inventory")
+                continue
+
+            if bool(part_doc.get("do_not_track_inventory")):
+                continue
+
+            part_id = part_doc.get("_id")
+            if not part_id:
+                continue
+
+            key = str(part_id)
+            if key not in out:
+                out[key] = {
+                    "part_id": part_id,
+                    "part_number": str(part_doc.get("part_number") or raw_part_number or "").strip(),
+                    "qty": 0,
+                }
+            out[key]["qty"] += int(qty)
+
+    return out, errors
+
+
 def normalize_totals_payload(raw):
     src = raw if isinstance(raw, dict) else {}
 
@@ -1088,61 +1165,48 @@ def deduct_parts_from_inventory(shop_db, labors: list, user_id: ObjectId) -> dic
     errors = []
     now = utcnow()
 
-    for labor_block in labors:
-        if not isinstance(labor_block, dict):
+    required_map, collect_errors = _collect_inventory_qty_by_part(shop_db, labors)
+    errors.extend(collect_errors)
+
+    for item in required_map.values():
+        part_id = item.get("part_id")
+        part_number = item.get("part_number") or ""
+        qty = int(item.get("qty") or 0)
+        if not part_id or qty <= 0:
             continue
 
-        parts = labor_block.get("parts") or []
-        if not isinstance(parts, list):
+        part_doc = shop_db.parts.find_one({"_id": part_id, "is_active": True}, {"in_stock": 1})
+        if not part_doc:
+            errors.append(f"Part '{part_number}' not found in inventory")
             continue
 
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-
-            part_number = str(part.get("part_number") or "").strip()
-            qty = i32(part.get("qty"))
-
-            # Skip if no part_number or qty
-            if not part_number or qty is None or qty <= 0:
-                continue
-
-            # Find part by number
-            part_doc = shop_db.parts.find_one({"part_number": part_number, "is_active": True})
-            if not part_doc:
-                errors.append(f"Part '{part_number}' not found in inventory")
-                continue
-
-            part_id = part_doc.get("_id")
-            current_stock = int(part_doc.get("in_stock") or 0)
-
-            if current_stock < qty:
-                errors.append(
-                    f"Insufficient stock for '{part_number}': "
-                    f"need {qty}, have {current_stock}"
-                )
-                continue
-
-            # Deduct from inventory
-            new_stock = current_stock - qty
-            shop_db.parts.update_one(
-                {"_id": part_id},
-                {
-                    "$set": {
-                        "in_stock": new_stock,
-                        "updated_at": now,
-                        "updated_by": user_id,
-                    }
-                }
+        current_stock = int(part_doc.get("in_stock") or 0)
+        if current_stock < qty:
+            errors.append(
+                f"Insufficient stock for '{part_number}': "
+                f"need {qty}, have {current_stock}"
             )
+            continue
 
-            deducted.append({
-                "part_id": str(part_id),
-                "part_number": part_number,
-                "qty_used": qty,
-                "previous_stock": current_stock,
-                "new_stock": new_stock,
-            })
+        new_stock = current_stock - qty
+        shop_db.parts.update_one(
+            {"_id": part_id},
+            {
+                "$set": {
+                    "in_stock": new_stock,
+                    "updated_at": now,
+                    "updated_by": user_id,
+                }
+            }
+        )
+
+        deducted.append({
+            "part_id": str(part_id),
+            "part_number": part_number,
+            "qty_used": qty,
+            "previous_stock": current_stock,
+            "new_stock": new_stock,
+        })
 
     return {
         "success": len(errors) == 0,
@@ -1163,50 +1227,39 @@ def restore_parts_to_inventory(shop_db, labors: list, user_id: ObjectId) -> dict
     errors = []
     now = utcnow()
 
-    for labor_block in labors:
-        if not isinstance(labor_block, dict):
+    required_map, collect_errors = _collect_inventory_qty_by_part(shop_db, labors)
+    errors.extend(collect_errors)
+
+    for item in required_map.values():
+        part_id = item.get("part_id")
+        part_number = item.get("part_number") or ""
+        qty = int(item.get("qty") or 0)
+        if not part_id or qty <= 0:
             continue
 
-        parts = labor_block.get("parts") or []
-        if not isinstance(parts, list):
+        part_doc = shop_db.parts.find_one({"_id": part_id, "is_active": True}, {"in_stock": 1})
+        if not part_doc:
+            errors.append(f"Part '{part_number}' not found when restoring")
             continue
 
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-
-            part_number = str(part.get("part_number") or "").strip()
-            qty = i32(part.get("qty"))
-
-            if not part_number or qty is None or qty <= 0:
-                continue
-
-            part_doc = shop_db.parts.find_one({"part_number": part_number, "is_active": True})
-            if not part_doc:
-                errors.append(f"Part '{part_number}' not found when restoring")
-                continue
-
-            part_id = part_doc.get("_id")
-            current_stock = int(part_doc.get("in_stock") or 0)
-
-            # Restore to inventory
-            new_stock = current_stock + qty
-            shop_db.parts.update_one(
-                {"_id": part_id},
-                {
-                    "$set": {
-                        "in_stock": new_stock,
-                        "updated_at": now,
-                        "updated_by": user_id,
-                    }
+        current_stock = int(part_doc.get("in_stock") or 0)
+        new_stock = current_stock + qty
+        shop_db.parts.update_one(
+            {"_id": part_id},
+            {
+                "$set": {
+                    "in_stock": new_stock,
+                    "updated_at": now,
+                    "updated_by": user_id,
                 }
-            )
+            }
+        )
 
-            restored.append({
-                "part_id": str(part_id),
-                "part_number": part_number,
-                "qty_restored": qty,
-            })
+        restored.append({
+            "part_id": str(part_id),
+            "part_number": part_number,
+            "qty_restored": qty,
+        })
 
     return {
         "success": True,
@@ -1227,42 +1280,34 @@ def adjust_inventory_for_part_changes(shop_db, old_labors: list, new_labors: lis
     adjusted = []
     now = utcnow()
 
-    # Build part maps for old and new
-    old_parts_map = {}  # part_number -> qty
-    for labor_block in old_labors:
-        parts = labor_block.get("parts") or []
-        for part in parts:
-            pn = str(part.get("part_number") or "").strip()
-            qty = i32(part.get("qty")) or 0
-            if pn:
-                old_parts_map[pn] = old_parts_map.get(pn, 0) + qty
+    old_parts_map, old_errors = _collect_inventory_qty_by_part(shop_db, old_labors)
+    new_parts_map, new_errors = _collect_inventory_qty_by_part(shop_db, new_labors)
+    errors.extend(old_errors)
+    errors.extend(new_errors)
 
-    new_parts_map = {}  # part_number -> qty
-    for labor_block in new_labors:
-        parts = labor_block.get("parts") or []
-        for part in parts:
-            pn = str(part.get("part_number") or "").strip()
-            qty = i32(part.get("qty")) or 0
-            if pn:
-                new_parts_map[pn] = new_parts_map.get(pn, 0) + qty
+    all_part_keys = set(old_parts_map.keys()) | set(new_parts_map.keys())
 
-    # Find all changed part numbers
-    all_part_numbers = set(old_parts_map.keys()) | set(new_parts_map.keys())
-
-    for part_number in all_part_numbers:
-        old_qty = old_parts_map.get(part_number, 0)
-        new_qty = new_parts_map.get(part_number, 0)
+    for part_key in all_part_keys:
+        old_item = old_parts_map.get(part_key) or {}
+        new_item = new_parts_map.get(part_key) or {}
+        old_qty = int(old_item.get("qty") or 0)
+        new_qty = int(new_item.get("qty") or 0)
         qty_diff = new_qty - old_qty
 
         if qty_diff == 0:
             continue
 
-        part_doc = shop_db.parts.find_one({"part_number": part_number, "is_active": True})
+        part_id = new_item.get("part_id") or old_item.get("part_id")
+        part_number = (new_item.get("part_number") or old_item.get("part_number") or "").strip()
+
+        if not part_id:
+            continue
+
+        part_doc = shop_db.parts.find_one({"_id": part_id, "is_active": True}, {"in_stock": 1})
         if not part_doc:
             errors.append(f"Part '{part_number}' not found when adjusting")
             continue
 
-        part_id = part_doc.get("_id")
         current_stock = int(part_doc.get("in_stock") or 0)
 
         # qty_diff > 0: more parts needed, deduct from stock
@@ -1944,6 +1989,7 @@ def api_parts_search():
         "reference": 1,
         "average_cost": 1,
         "in_stock": 1,
+        "do_not_track_inventory": 1,
         "core_has_charge": 1,
         "core_cost": 1,
         "misc_has_charge": 1,
@@ -1985,6 +2031,7 @@ def api_parts_search():
             "reference": p.get("reference") or "",
             "average_cost": float(p.get("average_cost") or 0),
             "in_stock": int(p.get("in_stock") or 0),
+            "do_not_track_inventory": bool(p.get("do_not_track_inventory")),
             "core_has_charge": bool(p.get("core_has_charge")),
             "core_cost": float(p.get("core_cost") or 0),
             "misc_has_charge": bool(p.get("misc_has_charge")),
@@ -2043,6 +2090,7 @@ def api_parts_search():
                 "reference": p.get("reference") or "",
                 "average_cost": float(p.get("average_cost") or 0),
                 "in_stock": int(p.get("in_stock") or 0),
+                "do_not_track_inventory": bool(p.get("do_not_track_inventory")),
                 "core_has_charge": bool(p.get("core_has_charge")),
                 "core_cost": float(p.get("core_cost") or 0),
                 "misc_has_charge": bool(p.get("misc_has_charge")),

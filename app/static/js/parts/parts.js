@@ -182,6 +182,7 @@
 						<option value="">-- Select type --</option>
 						<option value="shop_supply" ${type === "shop_supply" ? "selected" : ""}>shop supply</option>
 						<option value="tools" ${type === "tools" ? "selected" : ""}>tools</option>
+						<option value="utilities" ${type === "utilities" ? "selected" : ""}>utilities</option>
 						<option value="payment_to_another_service" ${type === "payment_to_another_service" ? "selected" : ""}>payment to another service</option>
 					</select>
 				</td>
@@ -1052,13 +1053,40 @@
 		const vendorSelectParts = document.querySelector('select[name="vendor_id"]');
 		const categorySelect = document.querySelector('select[name="category_id"]');
 		const locationSelect = document.querySelector('select[name="location_id"]');
+		const inStockGroup = document.getElementById('inStockGroup');
 		const inStockInput = document.querySelector('input[name="in_stock"]');
 		const averageCostInput = document.querySelector('input[name="average_cost"]');
+		const doNotTrackInventoryCheckbox = document.getElementById('doNotTrackInventoryToggle');
 		const coreCheckbox = document.getElementById('coreChargeToggle');
 		const coreCostInput = document.querySelector('input[name="core_cost"]');
+		const coreCostGroup = document.getElementById('coreCostGroup');
 		const miscCheckbox = document.getElementById('miscChargeToggle');
 		const miscBodyParts = document.getElementById('miscChargesBody');
 		const form = document.querySelector('form[action*="/parts/create"]');
+
+		function syncInStockVisibility() {
+			const hide = !!(doNotTrackInventoryCheckbox && doNotTrackInventoryCheckbox.checked);
+			if (inStockGroup) inStockGroup.style.display = hide ? 'none' : '';
+			if (inStockInput) {
+				inStockInput.disabled = hide;
+				if (hide) inStockInput.value = '';
+				if (!hide && String(inStockInput.value || '').trim() === '') inStockInput.value = '0';
+			}
+
+			if (coreCheckbox) {
+				coreCheckbox.disabled = hide;
+				if (hide) coreCheckbox.checked = false;
+			}
+			if (coreCostInput) {
+				coreCostInput.disabled = hide || !(coreCheckbox && coreCheckbox.checked);
+				if (hide) coreCostInput.value = '0';
+			}
+			if (coreCostGroup) {
+				coreCostGroup.style.display = hide ? 'none' : ((coreCheckbox && coreCheckbox.checked) ? '' : 'none');
+			}
+		}
+
+		doNotTrackInventoryCheckbox?.addEventListener('change', syncInStockVisibility);
 
 		// Handle Edit Part buttons
 		document.addEventListener('click', function(e) {
@@ -1095,11 +1123,14 @@
 				locationSelect.value = item.location_id;
 				inStockInput.value = item.in_stock;
 				averageCostInput.value = item.average_cost;
+				if (doNotTrackInventoryCheckbox) {
+					doNotTrackInventoryCheckbox.checked = !!item.do_not_track_inventory;
+				}
+				syncInStockVisibility();
 
 				// Core charge
-				coreCheckbox.checked = item.core_has_charge;
-				coreCostInput.value = item.core_cost;
-				document.getElementById('coreCostGroup').style.display = item.core_has_charge ? '' : 'none';
+				if (coreCheckbox) coreCheckbox.checked = item.core_has_charge;
+				if (coreCostInput) coreCostInput.value = item.core_cost;
 
 				// Misc charges
 				miscCheckbox.checked = item.misc_has_charge;
@@ -1151,6 +1182,7 @@
 						location_id: locationSelect.value,
 						in_stock: parseInt(inStockInput.value || '0'),
 						average_cost: parseFloat(averageCostInput.value || '0'),
+						do_not_track_inventory: !!(doNotTrackInventoryCheckbox && doNotTrackInventoryCheckbox.checked),
 						core_has_charge: coreCheckbox.checked,
 						core_cost: parseFloat(coreCostInput.value || '0'),
 						misc_has_charge: miscCheckbox.checked,
@@ -1202,13 +1234,14 @@
 			editingPartId.value = '';
 			modalTitle.textContent = 'Create new part';
 			form.reset();
-			if (document.getElementById('coreCostGroup')) {
-				document.getElementById('coreCostGroup').style.display = 'none';
-			}
+			syncInStockVisibility();
+			if (coreCostGroup) coreCostGroup.style.display = 'none';
 			if (document.getElementById('miscChargesGroup')) {
 				document.getElementById('miscChargesGroup').style.display = 'none';
 			}
 		});
+
+		syncInStockVisibility();
 	}
 
 	});

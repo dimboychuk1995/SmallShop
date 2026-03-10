@@ -89,7 +89,13 @@
                 <td class="fw-semibold">{{ p.part_number }}</td>
                 <td class="text-muted">{{ p.description if p.description else "-" }}</td>
                 <td class="text-muted">{{ p.reference if p.reference else "-" }}</td>
-                <td class="text-end">{{ p.in_stock if p.in_stock is not none else 0 }}</td>
+                <td class="text-end">
+                  {% if p.do_not_track_inventory %}
+                    <span class="text-muted">Not tracked</span>
+                  {% else %}
+                    {{ p.in_stock if p.in_stock is not none else 0 }}
+                  {% endif %}
+                </td>
                 <td class="text-end">
                   {% if p.average_cost is not none %}
                     {{ "%.2f"|format(p.average_cost) }}
@@ -279,6 +285,7 @@
                   <span>Total: <strong>${{ "%.2f"|format((orders_totals or {}).get('total', 0)) }}</strong></span>
                   <span>Shop Supply: <strong>${{ "%.2f"|format((orders_totals or {}).get('shop_supply', 0)) }}</strong></span>
                   <span>Tools: <strong>${{ "%.2f"|format((orders_totals or {}).get('tools', 0)) }}</strong></span>
+                  <span>Utilities: <strong>${{ "%.2f"|format((orders_totals or {}).get('utilities', 0)) }}</strong></span>
                   <span>Another Service: <strong>${{ "%.2f"|format((orders_totals or {}).get('another_service', 0)) }}</strong></span>
                 </div>
               </div>
@@ -437,7 +444,7 @@
               <input name="description" class="form-control" autocomplete="off" />
             </div>
 
-            <div class="col-md-4">
+            <div class="col-md-4" id="inStockGroup">
               <label class="form-label">In stock</label>
               <input name="in_stock" type="number" min="0" step="1" value="0" class="form-control" />
             </div>
@@ -445,6 +452,14 @@
             <div class="col-md-4">
               <label class="form-label">Average cost</label>
               <input name="average_cost" type="number" min="0" step="0.01" value="0" class="form-control" />
+            </div>
+
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doNotTrackInventoryToggle" name="do_not_track_inventory" value="1">
+                <label class="form-check-label" for="doNotTrackInventoryToggle">Do not track inventory for this part</label>
+              </div>
+              <div class="form-text">Part will be available in work orders and purchases, but stock quantity will not be auto-adjusted.</div>
             </div>
 
             <div class="col-md-4">
@@ -744,6 +759,6 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/parts/parts.js', v='20260308-non-inventory-v2') }}"></script>
+<script src="{{ url_for('static', filename='js/parts/parts.js', v='20260309-no-core-for-not-tracked') }}"></script>
 
 {% endblock %}
