@@ -4,7 +4,7 @@
 
 {% block extra_styles %}
   {{ super() }}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css', v='20260308-dashboard-v3') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css', v='20260309-dashboard-dual-donut') }}">
 {% endblock %}
 
 {% block app_content %}
@@ -86,19 +86,29 @@
     <div class="card">
       <div class="card-body">
         <div class="small text-muted mb-2">Parts Orders: Received vs Ordered</div>
-        <div class="dashboard-donut-wrap">
+        <div class="dashboard-donut-wrap dashboard-donut-dual-wrap">
           <div class="dashboard-donut-glow dashboard-donut-glow-po"></div>
-          <div class="dashboard-donut dashboard-donut-po" style="--received: {{ '%.2f'|format(parts_orders_received_percent or 0) }}%"></div>
+          <div class="dashboard-dual-ring dashboard-dual-ring-outer" style="--outer: {{ '%.2f'|format(parts_orders_received_percent or 0) }}%"></div>
+          <div class="dashboard-dual-gap"></div>
+          <div class="dashboard-dual-ring dashboard-dual-ring-inner" style="--inner: {{ '%.2f'|format(parts_orders_paid_percent_by_amount or 0) }}%"></div>
           <div class="dashboard-donut-center">
             <div class="small text-muted">In Period</div>
             <div class="fw-semibold">{{ period_parts_orders_total or 0 }}</div>
             <div class="small text-muted">Parts Orders</div>
-            <div class="dashboard-donut-percent">{{ '%.1f'|format(parts_orders_received_percent or 0) }}% received</div>
           </div>
+        </div>
+        <div class="small text-muted text-center mt-2">
+          Outer ring: <strong>{{ '%.1f'|format(parts_orders_received_percent or 0) }}% received (count)</strong>
+          &nbsp;|&nbsp;
+          Inner ring: <strong>{{ '%.1f'|format(parts_orders_paid_percent_by_amount or 0) }}% paid (amount)</strong>
         </div>
         <div class="d-flex justify-content-center gap-3 mt-3 small dashboard-legend-row">
           <span><span class="dashboard-dot dashboard-dot-received"></span> Received: {{ period_parts_orders_received or 0 }}</span>
           <span><span class="dashboard-dot dashboard-dot-ordered"></span> Ordered: {{ period_parts_orders_ordered or 0 }}</span>
+        </div>
+        <div class="d-flex justify-content-center gap-3 mt-2 small dashboard-legend-row">
+          <span><span class="dashboard-dot dashboard-dot-paid"></span> Paid: {{ period_parts_orders_paid_count or 0 }} ({{ "%.2f"|format(period_parts_orders_paid_amount or 0) }}$)</span>
+          <span><span class="dashboard-dot dashboard-dot-unpaid"></span> Unpaid: {{ period_parts_orders_unpaid_count or 0 }} ({{ "%.2f"|format(period_parts_orders_unpaid_amount or 0) }}$)</span>
         </div>
         <div class="wo-totals-center mt-2">
           <div class="wo-totals-box">

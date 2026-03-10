@@ -287,7 +287,7 @@ def dashboard():
     period_parts_orders_rows = list(
         shop_db.parts_orders.find(
             parts_orders_query,
-            {"_id": 1, "status": 1, "items": 1, "non_inventory_amounts": 1},
+            {"_id": 1, "status": 1, "items": 1, "non_inventory_amounts": 1, "payment_status": 1, "paid_amount": 1},
         )
     )
 
@@ -297,6 +297,21 @@ def dashboard():
     period_parts_orders_items_amount = 0.0
     period_parts_orders_non_inventory_amount = 0.0
     period_parts_orders_total_amount = 0.0
+    period_parts_orders_paid_count = 0
+    period_parts_orders_unpaid_count = 0
+    period_parts_orders_paid_amount = 0.0
+    period_parts_orders_unpaid_amount = 0.0
+
+    period_parts_order_ids = [x.get("_id") for x in period_parts_orders_rows if x.get("_id")]
+    parts_orders_paid_map = {}
+    if period_parts_order_ids:
+        pipeline = [
+            {"$match": {"parts_order_id": {"$in": period_parts_order_ids}, "is_active": True}},
+            {"$group": {"_id": "$parts_order_id", "paid_total": {"$sum": "$amount"}}},
+        ]
+        for row in shop_db.parts_order_payments.aggregate(pipeline):
+            parts_orders_paid_map[row.get("_id")] = _round2(row.get("paid_total") or 0)
+
     for order in period_parts_orders_rows:
         status = str(order.get("status") or "").strip().lower()
         order_amount = 0.0
@@ -318,6 +333,23 @@ def dashboard():
 
         period_parts_orders_total_amount = _round2(period_parts_orders_total_amount + order_amount)
 
+        paid_amount = _round2(parts_orders_paid_map.get(order.get("_id"), order.get("paid_amount") or 0))
+        payment_status = str(order.get("payment_status") or "").strip().lower()
+        is_paid = False
+        if payment_status == "paid":
+            is_paid = True
+        elif order_amount <= 0:
+            is_paid = True
+        elif paid_amount + 0.01 >= order_amount:
+            is_paid = True
+
+        if is_paid:
+            period_parts_orders_paid_count += 1
+            period_parts_orders_paid_amount = _round2(period_parts_orders_paid_amount + order_amount)
+        else:
+            period_parts_orders_unpaid_count += 1
+            period_parts_orders_unpaid_amount = _round2(period_parts_orders_unpaid_amount + order_amount)
+
         if status == "received":
             period_parts_orders_received += 1
         else:
@@ -325,6 +357,17 @@ def dashboard():
 
     parts_orders_received_percent = (
         (period_parts_orders_received / period_parts_orders_total) * 100.0
+        if period_parts_orders_total
+        else 0.0
+    )
+    parts_orders_paid_amount_total = _round2(period_parts_orders_paid_amount + period_parts_orders_unpaid_amount)
+    parts_orders_paid_percent_by_amount = (
+        (period_parts_orders_paid_amount / parts_orders_paid_amount_total) * 100.0
+        if parts_orders_paid_amount_total
+        else 0.0
+    )
+    parts_orders_paid_percent = (
+        (period_parts_orders_paid_count / period_parts_orders_total) * 100.0
         if period_parts_orders_total
         else 0.0
     )
@@ -393,7 +436,13 @@ def dashboard():
         period_parts_orders_total=period_parts_orders_total,
         period_parts_orders_received=period_parts_orders_received,
         period_parts_orders_ordered=period_parts_orders_ordered,
+        period_parts_orders_paid_count=period_parts_orders_paid_count,
+        period_parts_orders_unpaid_count=period_parts_orders_unpaid_count,
+        period_parts_orders_paid_amount=period_parts_orders_paid_amount,
+        period_parts_orders_unpaid_amount=period_parts_orders_unpaid_amount,
+        parts_orders_paid_percent_by_amount=parts_orders_paid_percent_by_amount,
         parts_orders_received_percent=parts_orders_received_percent,
+        parts_orders_paid_percent=parts_orders_paid_percent,
         period_parts_orders_items_amount=period_parts_orders_items_amount,
         period_parts_orders_non_inventory_amount=period_parts_orders_non_inventory_amount,
         period_parts_orders_total_amount=period_parts_orders_total_amount,
