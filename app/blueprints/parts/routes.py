@@ -1708,7 +1708,7 @@ def parts_api_orders_receive(order_id: str):
     user_oid = _oid(session.get(SESSION_USER_ID))
 
     updated = 0
-    skipped_not_tracked = 0
+    updated_not_tracked = 0
     for it in items:
         pid = it.get("part_id")
         if not pid:
@@ -1727,7 +1727,16 @@ def parts_api_orders_receive(order_id: str):
             continue
 
         if bool(part.get("do_not_track_inventory")):
-            skipped_not_tracked += 1
+            parts_coll.update_one(
+                {"_id": pid},
+                {"$set": {
+                    "average_cost": float(recv_price),
+                    "updated_at": now,
+                    "updated_by": user_oid,
+                }},
+            )
+            updated_not_tracked += 1
+            updated += 1
             continue
 
         old_qty = int(part.get("in_stock") or 0)
@@ -1762,7 +1771,7 @@ def parts_api_orders_receive(order_id: str):
     return jsonify({
         "ok": True,
         "updated_parts": updated,
-        "skipped_not_tracked": skipped_not_tracked,
+        "updated_not_tracked": updated_not_tracked,
     })
 
 
