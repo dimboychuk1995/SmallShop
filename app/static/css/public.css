@@ -35,6 +35,11 @@ main {
   position: relative;
 }
 
+body.is-search-loading .app-main-col {
+  opacity: 0.78;
+  pointer-events: none;
+}
+
 .app-shell {
   position: relative;
 }

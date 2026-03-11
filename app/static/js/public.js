@@ -13,6 +13,7 @@
 		"estimates_per_page",
 	];
 	var activeSearchController = null;
+	var activeNavigationController = null;
 
 	function getFormActionPath(form) {
 		var action = form.getAttribute("action") || window.location.pathname;
@@ -124,9 +125,141 @@
 		}
 
 		currentMainCol.innerHTML = newMainCol.innerHTML;
+
+		var scripts = currentMainCol.querySelectorAll("script");
+		for (var i = 0; i < scripts.length; i += 1) {
+			var oldScript = scripts[i];
+			var newScript = document.createElement("script");
+			for (var a = 0; a < oldScript.attributes.length; a += 1) {
+				var attr = oldScript.attributes[a];
+				newScript.setAttribute(attr.name, attr.value);
+			}
+			newScript.text = oldScript.text || oldScript.textContent || "";
+			oldScript.parentNode.replaceChild(newScript, oldScript);
+		}
+
+		if (doc && typeof doc.title === "string" && doc.title) {
+			document.title = doc.title;
+		}
+
 		window.dispatchEvent(new CustomEvent("smallshop:content-replaced"));
 		bindAutoSearchForms();
 		return true;
+	}
+
+	function updateSidebarActiveState(pathname) {
+		var links = document.querySelectorAll(".app-sidebar-link");
+		for (var i = 0; i < links.length; i += 1) {
+			var link = links[i];
+			var href = link.getAttribute("href") || "";
+			if (!href) continue;
+			var linkUrl;
+			try {
+				linkUrl = new URL(href, window.location.origin);
+			} catch (e) {
+				continue;
+			}
+
+			var isActive = linkUrl.pathname === pathname;
+			link.classList.toggle("active", isActive);
+			if (isActive) {
+				link.setAttribute("aria-current", "page");
+			} else {
+				link.removeAttribute("aria-current");
+			}
+		}
+	}
+
+	function shouldHandleSidebarNavigation(anchor, url) {
+		if (!anchor || !url) return false;
+		if (!anchor.classList.contains("app-sidebar-link")) return false;
+		if (anchor.target && anchor.target !== "_self") return false;
+		if (anchor.hasAttribute("download")) return false;
+		if (url.origin !== window.location.origin) return false;
+		if (url.pathname === window.location.pathname && url.search === window.location.search) return false;
+		return true;
+	}
+
+	async function runSidebarNavigation(url, shouldPushHistory) {
+		if (activeNavigationController) {
+			activeNavigationController.abort();
+		}
+		activeNavigationController = new AbortController();
+
+		try {
+			document.body.classList.add("is-search-loading");
+			var response = await fetch(url.toString(), {
+				method: "GET",
+				headers: {
+					"X-Requested-With": "XMLHttpRequest",
+					"Accept": "text/html",
+				},
+				signal: activeNavigationController.signal,
+				credentials: "same-origin",
+			});
+
+			if (!response.ok) {
+				throw new Error("Navigation request failed");
+			}
+
+			var html = await response.text();
+			var replaced = replaceMainContent(html);
+			if (!replaced) {
+				window.location.assign(url.toString());
+				return;
+			}
+
+			updateSidebarActiveState(url.pathname);
+			if (shouldPushHistory) {
+				window.history.pushState({}, "", url.pathname + url.search + url.hash);
+			}
+			window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+		} catch (error) {
+			if (error && error.name === "AbortError") {
+				return;
+			}
+			window.location.assign(url.toString());
+		} finally {
+			document.body.classList.remove("is-search-loading");
+		}
+	}
+
+	function bindSidebarNavigation() {
+		if (document.body.dataset.sidebarNavBound === "1") {
+			return;
+		}
+		document.body.dataset.sidebarNavBound = "1";
+
+		document.addEventListener("click", function (event) {
+			var anchor = event.target && event.target.closest ? event.target.closest("a.app-sidebar-link") : null;
+			if (!anchor) return;
+			if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+				return;
+			}
+
+			var url;
+			try {
+				url = new URL(anchor.href, window.location.origin);
+			} catch (e) {
+				return;
+			}
+
+			if (!shouldHandleSidebarNavigation(anchor, url)) {
+				return;
+			}
+
+			event.preventDefault();
+			runSidebarNavigation(url, true);
+		});
+
+		window.addEventListener("popstate", function () {
+			var links = document.querySelectorAll(".app-sidebar-link");
+			var hasSidebar = links && links.length > 0;
+			if (!hasSidebar) return;
+
+			var url = new URL(window.location.href);
+			runSidebarNavigation(url, false);
+		});
 	}
 
 	async function runSearch(form, input) {
@@ -282,5 +415,9 @@
 		}
 	}
 
-	document.addEventListener("DOMContentLoaded", bindAutoSearchForms);
+	document.addEventListener("DOMContentLoaded", function () {
+		bindAutoSearchForms();
+		bindSidebarNavigation();
+		updateSidebarActiveState(window.location.pathname);
+	});
 })();
