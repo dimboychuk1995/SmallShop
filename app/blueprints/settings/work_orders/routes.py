@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 
 from flask import render_template, redirect, url_for, flash, session, request
 
@@ -74,6 +75,88 @@ def _render_settings_page(template_name: str, **ctx):
     return render_template(template_name, **layout)
 
 
+def _load_labor_rates(labor_rates_col, shop_oid):
+    rows = list(
+        labor_rates_col.find(
+            {"shop_id": shop_oid, "is_active": True},
+            {"code": 1, "name": 1, "hourly_rate": 1},
+        ).sort([("name", 1), ("code", 1)])
+    )
+    out = []
+    for row in rows:
+        code = str(row.get("code") or "").strip()
+        if not code:
+            continue
+        out.append(
+            {
+                "id": str(row.get("_id")),
+                "code": code,
+                "name": str(row.get("name") or code).strip() or code,
+                "hourly_rate": float(row.get("hourly_rate") or 0.0),
+            }
+        )
+    return out
+
+
+def _validate_labor_rate_payload(code_raw, name_raw, hourly_rate_raw):
+    code = str(code_raw or "").strip().lower().replace(" ", "_")
+    name = str(name_raw or "").strip()
+    if not code:
+        return None, None, None, "Labor rate code is required."
+    if not name:
+        return None, None, None, "Labor rate name is required."
+
+    try:
+        hourly_rate = float(hourly_rate_raw)
+    except Exception:
+        return None, None, None, "Hourly rate must be a number."
+
+    if hourly_rate < 0:
+        return None, None, None, "Hourly rate cannot be negative."
+
+    return code, name, float(hourly_rate), None
+
+
+def _slugify_rate_code(value: str) -> str:
+    s = str(value or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "labor_rate"
+
+
+def _generate_unique_labor_rate_code(labor_rates_col, shop_oid, base_name: str) -> str:
+    base = _slugify_rate_code(base_name)
+    candidate = base
+    idx = 2
+    while labor_rates_col.find_one(
+        {
+            "shop_id": shop_oid,
+            "code": candidate,
+            "is_active": True,
+        },
+        {"_id": 1},
+    ):
+        candidate = f"{base}_{idx}"
+        idx += 1
+    return candidate
+
+
+def _validate_labor_rate_form(name_raw, hourly_rate_raw):
+    name = str(name_raw or "").strip()
+    if not name:
+        return None, None, "Labor rate name is required."
+
+    try:
+        hourly_rate = float(hourly_rate_raw)
+    except Exception:
+        return None, None, "Hourly rate must be a number."
+
+    if hourly_rate < 0:
+        return None, None, "Hourly rate cannot be negative."
+
+    return name, float(hourly_rate), None
+
+
 @settings_bp.route("/work_orders", methods=["GET", "POST"])
 @login_required
 @permission_required("settings.manage_org")
@@ -96,6 +179,7 @@ def work_orders_index():
     existing = rules_col.find_one({"shop_id": shop_oid})
     core_rules_col = sdb.core_charge_rules
     core_existing = core_rules_col.find_one({"shop_id": shop_oid})
+    labor_rates_col = sdb.labor_rates
 
     if request.method == "POST":
         raw = (request.form.get("shop_supply_procentage") or "").strip()
@@ -180,9 +264,154 @@ def work_orders_index():
 
     supply_value = existing.get("shop_supply_procentage") if isinstance(existing, dict) else 5
     core_charge_default = bool(core_existing.get("charge_for_cores_default")) if isinstance(core_existing, dict) else False
-
+    labor_rates = _load_labor_rates(labor_rates_col, shop_oid)
     return _render_settings_page(
         "public/settings/work_orders.html",
         shop_supply_procentage=supply_value,
         core_charge_default=core_charge_default,
+        labor_rates=labor_rates,
     )
+
+
+@settings_bp.post("/work_orders/labor_rates/create")
+@login_required
+@permission_required("settings.manage_org")
+def work_orders_labor_rates_create():
+    master = get_master_db()
+    user = _load_current_user(master)
+    tenant = _load_current_tenant(master)
+    if not user or not tenant:
+        flash("Session mismatch. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    sdb, shop_oid = _get_shop_db_strict(master)
+    if sdb is None or shop_oid is None:
+        flash("Please select an active shop first.", "error")
+        return redirect(url_for("main.settings"))
+
+    name, hourly_rate, err = _validate_labor_rate_form(
+        request.form.get("name"),
+        request.form.get("hourly_rate"),
+    )
+    if err:
+        flash(err, "error")
+        return redirect(url_for("settings.work_orders_index"))
+
+    labor_rates_col = sdb.labor_rates
+    code = _generate_unique_labor_rate_code(labor_rates_col, shop_oid, name)
+
+    now = datetime.now(timezone.utc)
+    labor_rates_col.insert_one(
+        {
+            "shop_id": shop_oid,
+            "code": code,
+            "name": name,
+            "hourly_rate": float(hourly_rate),
+            "is_active": True,
+            "created_at": now,
+            "created_by": user.get("_id"),
+            "updated_at": now,
+            "updated_by": user.get("_id"),
+        }
+    )
+
+    flash("Labor rate created.", "success")
+    return redirect(url_for("settings.work_orders_index"))
+
+
+@settings_bp.post("/work_orders/labor_rates/<rate_id>/update")
+@login_required
+@permission_required("settings.manage_org")
+def work_orders_labor_rates_update(rate_id: str):
+    master = get_master_db()
+    user = _load_current_user(master)
+    tenant = _load_current_tenant(master)
+    if not user or not tenant:
+        flash("Session mismatch. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    sdb, shop_oid = _get_shop_db_strict(master)
+    if sdb is None or shop_oid is None:
+        flash("Please select an active shop first.", "error")
+        return redirect(url_for("main.settings"))
+
+    rate_oid = _maybe_object_id(rate_id)
+    if not rate_oid:
+        flash("Invalid labor rate id.", "error")
+        return redirect(url_for("settings.work_orders_index"))
+
+    name, hourly_rate, err = _validate_labor_rate_form(
+        request.form.get("name"),
+        request.form.get("hourly_rate"),
+    )
+    if err:
+        flash(err, "error")
+        return redirect(url_for("settings.work_orders_index"))
+
+    labor_rates_col = sdb.labor_rates
+    target = labor_rates_col.find_one(
+        {"_id": rate_oid, "shop_id": shop_oid, "is_active": True},
+        {"_id": 1},
+    )
+    if not target:
+        flash("Labor rate not found.", "error")
+        return redirect(url_for("settings.work_orders_index"))
+
+    now = datetime.now(timezone.utc)
+    labor_rates_col.update_one(
+        {"_id": rate_oid},
+        {
+            "$set": {
+                "name": name,
+                "hourly_rate": float(hourly_rate),
+                "updated_at": now,
+                "updated_by": user.get("_id"),
+            }
+        },
+    )
+
+    flash("Labor rate updated.", "success")
+    return redirect(url_for("settings.work_orders_index"))
+
+
+@settings_bp.post("/work_orders/labor_rates/<rate_id>/delete")
+@login_required
+@permission_required("settings.manage_org")
+def work_orders_labor_rates_delete(rate_id: str):
+    master = get_master_db()
+    user = _load_current_user(master)
+    tenant = _load_current_tenant(master)
+    if not user or not tenant:
+        flash("Session mismatch. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    sdb, shop_oid = _get_shop_db_strict(master)
+    if sdb is None or shop_oid is None:
+        flash("Please select an active shop first.", "error")
+        return redirect(url_for("main.settings"))
+
+    rate_oid = _maybe_object_id(rate_id)
+    if not rate_oid:
+        flash("Invalid labor rate id.", "error")
+        return redirect(url_for("settings.work_orders_index"))
+
+    now = datetime.now(timezone.utc)
+    res = sdb.labor_rates.update_one(
+        {"_id": rate_oid, "shop_id": shop_oid, "is_active": True},
+        {
+            "$set": {
+                "is_active": False,
+                "updated_at": now,
+                "updated_by": user.get("_id"),
+            }
+        },
+    )
+    if res.matched_count == 0:
+        flash("Labor rate not found.", "error")
+        return redirect(url_for("settings.work_orders_index"))
+
+    flash("Labor rate deleted.", "success")
+    return redirect(url_for("settings.work_orders_index"))
