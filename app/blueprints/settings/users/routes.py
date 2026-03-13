@@ -18,6 +18,7 @@ from app.utils.permissions import permission_required, filter_nav_items
 from app.blueprints.main.routes import NAV_ITEMS
 from app.utils.layout import build_app_layout_context
 from app.utils.pagination import get_pagination_params, paginate_find
+from app.utils.mongo_search import build_regex_search_filter
 
 
 # -----------------------------
@@ -119,6 +120,21 @@ def _load_shops_for_tenant(master, tenant_id):
     return shops
 
 
+def _redirect_users_index():
+    q = (request.values.get("q") or "").strip()
+    page = (request.values.get("page") or "").strip()
+    per_page = (request.values.get("per_page") or "").strip()
+
+    params = {}
+    if q:
+        params["q"] = q
+    if page:
+        params["page"] = page
+    if per_page:
+        params["per_page"] = per_page
+    return redirect(url_for("settings.users_index", **params))
+
+
 # -----------------------------
 # UI Routes
 # -----------------------------
@@ -150,14 +166,30 @@ def users_index():
 
     tenant_values = _id_variants(tenant_from_user)
 
+    q = (request.args.get("q") or "").strip()
+
     page, per_page = get_pagination_params(request.args, default_per_page=20, max_per_page=100)
+    query_filter = {"tenant_id": {"$in": tenant_values}}
+    search_filter = build_regex_search_filter(
+        q,
+        text_fields=["name", "first_name", "last_name", "email", "phone", "role"],
+        object_id_fields=["_id"],
+    )
+    if search_filter:
+        query_filter = {"$and": [query_filter, search_filter]}
+
     users, pagination = paginate_find(
         master.users,
-        {"tenant_id": {"$in": tenant_values}},
+        query_filter,
         [("created_at", -1)],
         page,
         per_page,
     )
+
+    for u in users:
+        u["_id_str"] = str(u.get("_id") or "")
+        raw_shop_ids = u.get("shop_ids") if isinstance(u.get("shop_ids"), list) else []
+        u["shop_ids_str"] = [str(x) for x in raw_shop_ids if x is not None]
 
     # ✅ шапы для чекбоксов (только текущий tenant)
     shops_for_form = _load_shops_for_tenant(master, tenant_oid)
@@ -166,9 +198,147 @@ def users_index():
         "public/settings/users.html",
         users=users,
         pagination=pagination,
+        q=q,
         shops_for_form=shops_for_form,
         active_shop_id=str(session.get(SESSION_SHOP_ID) or "")  # чтобы в UI pre-check
     )
+
+
+@settings_bp.route("/users/<user_id>/edit", methods=["POST"])
+@login_required
+@permission_required("settings.manage_users")
+def users_edit(user_id):
+    master = get_master_db()
+
+    tenant_id_raw = session.get(SESSION_TENANT_ID)
+    if not tenant_id_raw:
+        flash("Tenant session missing. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    current_user = _load_current_user(master)
+    if not current_user:
+        flash("User session mismatch. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    target_id = _maybe_object_id(user_id)
+    if not target_id:
+        flash("Invalid user id.", "error")
+        return _redirect_users_index()
+
+    tenant_values = _id_variants(current_user.get("tenant_id") or tenant_id_raw)
+    target = master.users.find_one({"_id": target_id, "tenant_id": {"$in": tenant_values}})
+    if not target:
+        flash("User not found.", "error")
+        return _redirect_users_index()
+
+    first_name = (request.form.get("first_name") or "").strip()
+    last_name = (request.form.get("last_name") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    phone = (request.form.get("phone") or "").strip()
+    role = (request.form.get("role") or "viewer").strip().lower()
+    is_active = bool(request.form.get("is_active"))
+
+    if not first_name or not last_name or not email:
+        flash("Please fill first name, last name and email.", "error")
+        return _redirect_users_index()
+
+    existing = master.users.find_one({"email": email})
+    if existing and existing.get("_id") != target_id:
+        flash("User with this email already exists.", "error")
+        return _redirect_users_index()
+
+    tdb = _get_tenant_db()
+    if tdb is None:
+        flash("Tenant DB not found in session. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    role_doc = tdb.roles.find_one({"key": role})
+    if not role_doc:
+        flash("Selected role does not exist in tenant roles.", "error")
+        return _redirect_users_index()
+
+    selected_shop_ids_raw = request.form.getlist("shop_ids")
+    allowed_shop_ids = set(_safe_str_list(session.get("shop_ids")))
+
+    selected_shop_oids = []
+    for sid in selected_shop_ids_raw:
+        sid_str = str(sid).strip()
+        if not sid_str:
+            continue
+        if allowed_shop_ids and sid_str not in allowed_shop_ids:
+            continue
+        oid = _maybe_object_id(sid_str)
+        if oid and oid not in selected_shop_oids:
+            selected_shop_oids.append(oid)
+
+    if not selected_shop_oids:
+        selected_shop_oids = target.get("shop_ids") if isinstance(target.get("shop_ids"), list) else []
+
+    update_doc = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "name": f"{first_name} {last_name}".strip(),
+        "email": email,
+        "phone": phone or None,
+        "role": role,
+        "shop_ids": selected_shop_oids,
+        "is_active": is_active,
+        "updated_at": utcnow(),
+    }
+
+    password = request.form.get("password") or ""
+    if password:
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+            return _redirect_users_index()
+        from werkzeug.security import generate_password_hash
+        update_doc["password_hash"] = generate_password_hash(password)
+
+    if str(target_id) == str(session.get(SESSION_USER_ID)) and not is_active:
+        flash("You cannot deactivate your own account.", "error")
+        return _redirect_users_index()
+
+    master.users.update_one({"_id": target_id}, {"$set": update_doc})
+    flash("User updated successfully.", "success")
+    return _redirect_users_index()
+
+
+@settings_bp.route("/users/<user_id>/deactivate", methods=["POST"])
+@login_required
+@permission_required("settings.manage_users")
+def users_deactivate(user_id):
+    master = get_master_db()
+
+    tenant_id_raw = session.get(SESSION_TENANT_ID)
+    if not tenant_id_raw:
+        flash("Tenant session missing. Please login again.", "error")
+        session.clear()
+        return redirect(url_for("main.index"))
+
+    target_id = _maybe_object_id(user_id)
+    if not target_id:
+        flash("Invalid user id.", "error")
+        return _redirect_users_index()
+
+    if str(target_id) == str(session.get(SESSION_USER_ID)):
+        flash("You cannot deactivate your own account.", "error")
+        return _redirect_users_index()
+
+    tenant_values = _id_variants(tenant_id_raw)
+    res = master.users.update_one(
+        {"_id": target_id, "tenant_id": {"$in": tenant_values}},
+        {"$set": {"is_active": False, "updated_at": utcnow()}},
+    )
+
+    if res.matched_count == 0:
+        flash("User not found.", "error")
+        return _redirect_users_index()
+
+    flash("User deactivated.", "success")
+    return _redirect_users_index()
 
 
 def _handle_create_user(master, current_user, tenant_oid, tenant_id_raw):

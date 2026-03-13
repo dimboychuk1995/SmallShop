@@ -2,8 +2,6 @@
 {% block page_title %}Settings — Users{% endblock %}
 
 {% block app_content %}
-<!-- template: public/settings/users.html -->
-
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h1 class="h4 mb-1">Users</h1>
@@ -18,7 +16,6 @@
   </div>
 </div>
 
-<!-- Quick info -->
 <div class="alert alert-light border mb-3">
   <div class="d-flex flex-column flex-md-row gap-2 justify-content-between">
     <div>
@@ -31,42 +28,46 @@
   </div>
 </div>
 
-<!-- Users list -->
 <div class="card">
-  <div class="card-header d-flex flex-column flex-md-row gap-2 justify-content-between align-items-md-center">
-    <div class="fw-semibold">Users</div>
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-center mb-3">
+      <div class="col-12 col-md-8 col-lg-6">
+        <input
+          type="text"
+          name="q"
+          class="form-control form-control-sm"
+          placeholder="Search users by name, email, role, phone or ID..."
+          value="{{ q or '' }}"
+        />
+      </div>
+      {% if q %}
+        <div class="col-auto">
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('settings.users_index') }}">Reset</a>
+        </div>
+      {% endif %}
+    </form>
 
-    <div class="d-flex gap-2">
-      <input class="form-control form-control-sm" type="text" placeholder="Search (later)" disabled>
-    </div>
-  </div>
-
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-sm mb-0 align-middle">
-        <thead class="table-light">
-          <tr>
-            <th class="ps-3">Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Status</th>
-            <th class="text-end pe-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-
-          {% if users %}
+    {% if users %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="min-width: 220px;">Name</th>
+              <th style="min-width: 230px;">Email</th>
+              <th style="min-width: 160px;">Role</th>
+              <th style="min-width: 130px;">Status</th>
+              <th class="text-end" style="min-width: 220px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
             {% for u in users %}
+              {% set display_name = (u.get("name") or ((u.get("first_name", "") ~ " " ~ u.get("last_name", "")).strip())) or "—" %}
               <tr>
-                <td class="ps-3">
-                  <div class="fw-semibold">
-                    {{ u.get("name") or (u.get("first_name","") ~ " " ~ u.get("last_name","")) or "—" }}
-                  </div>
-                  <div class="text-muted small">
-                    ID: {{ u.get("_id") or "—" }}
-                  </div>
+                <td>
+                  <div class="fw-semibold">{{ display_name }}</div>
+                  <div class="text-muted small">ID: {{ u.get("_id_str") or "—" }}</div>
                 </td>
-                <td>{{ u.get("email") or "—" }}</td>
+                <td class="text-muted">{{ u.get("email") or "—" }}</td>
                 <td>
                   <span class="badge text-bg-secondary">{{ u.get("role") or "viewer" }}</span>
                 </td>
@@ -74,45 +75,69 @@
                   {% if u.get("is_active", True) %}
                     <span class="badge text-bg-success">Active</span>
                   {% else %}
-                    <span class="badge text-bg-danger">Inactive</span>
+                    <span class="badge text-bg-secondary">Inactive</span>
                   {% endif %}
                 </td>
-                <td class="text-end pe-3">
-                  <div class="btn-group btn-group-sm" role="group">
-                    <button class="btn btn-outline-secondary" type="button" disabled>Edit</button>
-                    <button class="btn btn-outline-danger" type="button" disabled>Deactivate</button>
+                <td class="text-end">
+                  <div class="d-inline-flex gap-1">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-primary edit-user-btn"
+                      data-bs-toggle="modal"
+                      data-bs-target="#editUserModal"
+                      data-user-id="{{ u.get('_id_str') }}"
+                      data-first-name="{{ u.get('first_name') or '' }}"
+                      data-last-name="{{ u.get('last_name') or '' }}"
+                      data-email="{{ u.get('email') or '' }}"
+                      data-phone="{{ u.get('phone') or '' }}"
+                      data-role="{{ u.get('role') or 'viewer' }}"
+                      data-is-active="{{ '1' if u.get('is_active', True) else '0' }}"
+                      data-shop-ids="{{ (u.get('shop_ids_str') or [])|join(',') }}"
+                    >
+                      Edit
+                    </button>
+
+                    {% if u.get('_id_str') != (session.get('user_id') or '')|string and u.get('is_active', True) %}
+                      <form method="post" action="{{ url_for('settings.users_deactivate', user_id=u.get('_id_str')) }}" class="d-inline">
+                        <input type="hidden" name="q" value="{{ q or '' }}">
+                        <input type="hidden" name="page" value="{{ pagination.page if pagination else 1 }}">
+                        <input type="hidden" name="per_page" value="{{ pagination.per_page if pagination else 20 }}">
+                        <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Deactivate this user?');">
+                          Deactivate
+                        </button>
+                      </form>
+                    {% endif %}
                   </div>
                 </td>
               </tr>
             {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="5" class="p-4">
-                <div class="text-center">
-                  <div class="fw-semibold mb-1">No users yet</div>
-                  <div class="text-muted mb-3">Create your first team member.</div>
-                  <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#createUserModal">
-                    + New user
-                  </button>
-                </div>
-              </td>
-            </tr>
-          {% endif %}
-
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="p-4 text-center">
+        <div class="fw-semibold mb-1">No users found</div>
+        <div class="text-muted mb-3">Try another search or create a new user.</div>
+        <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#createUserModal">
+          + New user
+        </button>
+      </div>
+    {% endif %}
 
     {% if pagination and pagination.pages > 1 %}
-      <div class="d-flex align-items-center justify-content-between p-3 border-top">
+      <div class="d-flex align-items-center justify-content-between mt-3 pt-3 border-top">
         <div class="small text-muted">
           Page {{ pagination.page }} of {{ pagination.pages }} · {{ pagination.total }} total
         </div>
         <div class="btn-group btn-group-sm" role="group" aria-label="Users pagination">
-          <a class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
-             href="{{ url_for('settings.users_index', page=pagination.prev_page, per_page=pagination.per_page) }}">Prev</a>
-          <a class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
-             href="{{ url_for('settings.users_index', page=pagination.next_page, per_page=pagination.per_page) }}">Next</a>
+          <a
+            class="btn btn-outline-secondary {% if not pagination.has_prev %}disabled{% endif %}"
+            href="{{ url_for('settings.users_index', q=q, page=pagination.prev_page, per_page=pagination.per_page) }}"
+          >Prev</a>
+          <a
+            class="btn btn-outline-secondary {% if not pagination.has_next %}disabled{% endif %}"
+            href="{{ url_for('settings.users_index', q=q, page=pagination.next_page, per_page=pagination.per_page) }}"
+          >Next</a>
         </div>
       </div>
     {% endif %}
@@ -135,23 +160,23 @@
           <div class="row g-3">
             <div class="col-12 col-md-6">
               <label class="form-label" for="first_name">First name</label>
-              <input class="form-control" id="first_name" name="first_name" type="text" required>
+              <input class="form-control" id="first_name" name="first_name" type="text" maxlength="80" required>
             </div>
 
             <div class="col-12 col-md-6">
               <label class="form-label" for="last_name">Last name</label>
-              <input class="form-control" id="last_name" name="last_name" type="text" required>
+              <input class="form-control" id="last_name" name="last_name" type="text" maxlength="80" required>
             </div>
 
             <div class="col-12">
               <label class="form-label" for="email">Email</label>
-              <input class="form-control" id="email" name="email" type="email" placeholder="user@company.com" required>
+              <input class="form-control" id="email" name="email" type="email" maxlength="120" placeholder="user@company.com" required>
               <div class="form-text">We’ll later add “Send invite email” flow.</div>
             </div>
 
             <div class="col-12 col-md-6">
               <label class="form-label" for="phone">Phone (optional)</label>
-              <input class="form-control" id="phone" name="phone" type="tel" placeholder="+1 (555) 555-5555">
+              <input class="form-control" id="phone" name="phone" type="tel" maxlength="50" placeholder="+1 (555) 555-5555">
             </div>
 
             <div class="col-12 col-md-6">
@@ -239,5 +264,102 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="editUserModalLabel">Edit user</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <form method="post" id="editUserForm" action="{{ url_for('settings.users_index') }}">
+        <input type="hidden" name="q" value="{{ q or '' }}">
+        <input type="hidden" name="page" value="{{ pagination.page if pagination else 1 }}">
+        <input type="hidden" name="per_page" value="{{ pagination.per_page if pagination else 20 }}">
+
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="edit_user_first_name">First name</label>
+              <input class="form-control" id="edit_user_first_name" name="first_name" type="text" maxlength="80" required>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="edit_user_last_name">Last name</label>
+              <input class="form-control" id="edit_user_last_name" name="last_name" type="text" maxlength="80" required>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="edit_user_email">Email</label>
+              <input class="form-control" id="edit_user_email" name="email" type="email" maxlength="120" required>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="edit_user_phone">Phone (optional)</label>
+              <input class="form-control" id="edit_user_phone" name="phone" type="tel" maxlength="50">
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="edit_user_role">Role</label>
+              <select class="form-select" id="edit_user_role" name="role" required>
+                <option value="manager">Manager</option>
+                <option value="parts_manager">Parts manager</option>
+                <option value="senior_mechanic">Senior mechanic</option>
+                <option value="mechanic">Mechanic</option>
+                <option value="viewer">Viewer</option>
+                <option value="general_manager">General manager</option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="edit_user_password">New password (optional)</label>
+              <input class="form-control" id="edit_user_password" name="password" type="password" minlength="8" placeholder="Leave blank to keep current">
+              <div class="form-text">If filled, must be at least 8 characters.</div>
+            </div>
+
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="1" id="edit_user_is_active" name="is_active">
+                <label class="form-check-label" for="edit_user_is_active">Active user</label>
+              </div>
+            </div>
+
+            <hr class="my-2">
+
+            <div class="col-12">
+              <label class="form-label mb-1">Shop access</label>
+              <div class="text-muted small mb-2">Select shops this user can work with.</div>
+              {% if shops_for_form and shops_for_form|length > 0 %}
+                <div class="row g-2">
+                  {% for s in shops_for_form %}
+                    <div class="col-12 col-md-6">
+                      <div class="form-check border rounded p-2">
+                        <input class="form-check-input edit-user-shop-checkbox" type="checkbox" name="shop_ids" id="edit_shop_{{ s.id }}" value="{{ s.id }}">
+                        <label class="form-check-label" for="edit_shop_{{ s.id }}">{{ s.name }}</label>
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="alert alert-warning border mb-0">
+                  No shops found. Create a shop first in Settings → Shops.
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/settings/users.js') }}"></script>
 
 {% endblock %}
