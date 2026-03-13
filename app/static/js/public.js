@@ -186,6 +186,7 @@
 		if (anchor.target && anchor.target !== "_self") return false;
 		if (anchor.hasAttribute("download")) return false;
 		if (url.origin !== window.location.origin) return false;
+		if (/^\/parts(\/|$)/.test(url.pathname)) return false;
 		if (url.pathname === window.location.pathname && url.search === window.location.search) return false;
 		return true;
 	}

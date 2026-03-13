@@ -22,7 +22,8 @@ def _maybe_object_id(value):
 
 def _is_api_request() -> bool:
     # простой и надежный детектор
-    if request.path.startswith("/api/"):
+    path = (request.path or "").lower()
+    if path.startswith("/api/") or "/api/" in path:
         return True
     if request.is_json:
         return True

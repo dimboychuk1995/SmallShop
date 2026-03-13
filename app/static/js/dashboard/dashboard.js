@@ -1,5 +1,6 @@
 (function () {
-  let activeRequestId = 0;
+  let activeBatchId = 0;
+  const blockRequestIds = new Map();
 
   function asNumber(value) {
     const n = Number(value);
@@ -11,7 +12,9 @@
   }
 
   function percent1(value) {
-    return `${asNumber(value).toFixed(1)}%`;
+    const n = asNumber(value);
+    if (n > 0 && n < 0.1) return `${n.toFixed(2)}%`;
+    return `${n.toFixed(1)}%`;
   }
 
   function clampPercent(value) {
@@ -31,47 +34,50 @@
     if (el) el.style.setProperty(name, `${clampPercent(value).toFixed(2)}%`);
   }
 
-  function renderDonutBackgrounds(data) {
+  function buildConicGradient(primaryColor, primaryPercent, secondaryColor) {
+    const primary = clampPercent(primaryPercent);
+    return `conic-gradient(from -90deg, ${primaryColor} 0%, ${primaryColor} ${primary.toFixed(2)}%, ${secondaryColor} ${primary.toFixed(2)}%, ${secondaryColor} 100%)`;
+  }
+
+  function renderWoMoneyDonut(data) {
     const paid = clampPercent(data.paid_percent);
     const woDonut = document.getElementById('dashWoDonut');
     if (woDonut) {
       woDonut.style.background =
-        `conic-gradient(from -90deg, #2d8b58 0 ${paid.toFixed(2)}%, #d25a5a ${paid.toFixed(2)}% 100%), ` +
+        `${buildConicGradient('#2d8b58', paid, '#d25a5a')}, ` +
         'radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 45%)';
     }
+  }
 
+  function renderPartsOrdersDonut(data) {
     const outer = clampPercent(data.parts_orders_received_percent);
     const inner = clampPercent(data.parts_orders_paid_percent_by_amount);
     const outerRing = document.getElementById('dashPoOuterRing');
     const innerRing = document.getElementById('dashPoInnerRing');
     if (outerRing) {
-      outerRing.style.background =
-        `conic-gradient(from -90deg, #2d6ca8 0 ${outer.toFixed(2)}%, #cf7a2d ${outer.toFixed(2)}% 100%)`;
+      outerRing.style.background = buildConicGradient('#2d6ca8', outer, '#cf7a2d');
     }
     if (innerRing) {
-      innerRing.style.background =
-        `conic-gradient(from -90deg, #2a7a4f 0 ${inner.toFixed(2)}%, #c44545 ${inner.toFixed(2)}% 100%)`;
+      innerRing.style.background = buildConicGradient('#2a7a4f', inner, '#c44545');
     }
   }
 
-  function hideLoaders() {
-    document.querySelectorAll('.dashboard-async-card').forEach((card) => {
-      card.classList.add('dashboard-loaded');
-    });
+  function setCardLoading(card) {
+    if (!card) return;
+    card.classList.remove('dashboard-loaded');
+    card.classList.remove('dashboard-load-error');
   }
 
-  function showLoaders() {
-    document.querySelectorAll('.dashboard-async-card').forEach((card) => {
-      card.classList.remove('dashboard-loaded');
-      card.classList.remove('dashboard-load-error');
-    });
+  function setCardLoaded(card) {
+    if (!card) return;
+    card.classList.add('dashboard-loaded');
+    card.classList.remove('dashboard-load-error');
   }
 
-  function setLoadError() {
-    document.querySelectorAll('.dashboard-async-card').forEach((card) => {
-      card.classList.add('dashboard-load-error');
-      card.classList.add('dashboard-loaded');
-    });
+  function setCardLoadError(card) {
+    if (!card) return;
+    card.classList.add('dashboard-load-error');
+    card.classList.add('dashboard-loaded');
   }
 
   function buildQueryString() {
@@ -118,9 +124,9 @@
     empty.style.display = 'none';
   }
 
-  function render(data) {
+  function renderWoMoney(data) {
     setDonutVar('dashWoDonut', '--paid', data.paid_percent);
-    renderDonutBackgrounds(data);
+    renderWoMoneyDonut(data);
     setText('dashPeriodMoneyTotal', money(data.period_money_total));
     setText('dashPeriodTotal', String(asNumber(data.period_total)));
     setText('dashPaidPercent', `${percent1(data.paid_percent)} paid`);
@@ -129,9 +135,12 @@
     setText('dashPeriodLaborTotal', money(data.period_labor_total));
     setText('dashPeriodPartsTotal', money(data.period_parts_total));
     setText('dashPeriodGrandTotal', money(data.period_grand_total));
+  }
 
+  function renderPartsOrders(data) {
     setDonutVar('dashPoOuterRing', '--outer', data.parts_orders_received_percent);
     setDonutVar('dashPoInnerRing', '--inner', data.parts_orders_paid_percent_by_amount);
+    renderPartsOrdersDonut(data);
     setText('dashPeriodPartsOrdersTotal', String(asNumber(data.period_parts_orders_total)));
     setText('dashPartsOrdersReceivedPercent', `${percent1(data.parts_orders_received_percent)} received (count)`);
     setText('dashPartsOrdersPaidPercentByAmount', `${percent1(data.parts_orders_paid_percent_by_amount)} paid (amount)`);
@@ -144,7 +153,9 @@
     setText('dashPeriodPartsOrdersItemsAmount', money(data.period_parts_orders_items_amount));
     setText('dashPeriodPartsOrdersNonInventoryAmount', money(data.period_parts_orders_non_inventory_amount));
     setText('dashPeriodPartsOrdersTotalAmount', money(data.period_parts_orders_total_amount));
+  }
 
+  function renderGoalProgress(data) {
     const goalCount = asNumber(data.goal_count);
     const goalPercent = clampPercent(data.goal_percent);
     setText('dashGoalCount', String(goalCount));
@@ -156,20 +167,47 @@
       'dashGoalSummary',
       `Current: ${asNumber(data.period_wo_total)} / ${goalCount} (${goalPercent.toFixed(1)}%)`
     );
+  }
 
+  function renderOutstandingBalance(data) {
     setText('dashOutstandingBalance', money(data.outstanding_balance));
+  }
 
+  function renderMechanicHoursBlock(data) {
     renderMechanicHours(data.mechanic_hours_rows);
   }
 
-  async function loadMetrics() {
-    const baseUrl = window.DASHBOARD_METRICS_API_URL;
-    if (!baseUrl) return;
+  const blockRenderers = {
+    'wo-money': renderWoMoney,
+    'parts-orders': renderPartsOrders,
+    'goal-progress': renderGoalProgress,
+    'outstanding-balance': renderOutstandingBalance,
+    'mechanic-hours': renderMechanicHoursBlock,
+  };
 
-    const thisRequestId = ++activeRequestId;
-    showLoaders();
+  function buildBlockUrl(blockName) {
+    const template = window.DASHBOARD_METRICS_BLOCK_API_TEMPLATE;
+    if (!template) return '';
+
+    const baseUrl = template.replace('__BLOCK__', encodeURIComponent(blockName));
     const qs = buildQueryString();
-    const url = `${baseUrl}${qs}`;
+    return qs ? `${baseUrl}${qs}` : baseUrl;
+  }
+
+  async function loadBlockMetrics(card, batchId) {
+    if (!card) return;
+
+    const blockName = String(card.dataset.block || '').trim();
+    const renderBlock = blockRenderers[blockName];
+    const url = buildBlockUrl(blockName);
+    if (!blockName || !renderBlock || !url) {
+      setCardLoadError(card);
+      return;
+    }
+
+    const requestId = (blockRequestIds.get(blockName) || 0) + 1;
+    blockRequestIds.set(blockName, requestId);
+    setCardLoading(card);
 
     let lastError = null;
     const maxAttempts = 3;
@@ -188,20 +226,20 @@
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
-        const data = await res.json();
-        if (!data || !data.ok) {
+        const payload = await res.json();
+        if (!payload || !payload.ok || !payload.data) {
           throw new Error('Metrics payload is invalid');
         }
-        if (thisRequestId !== activeRequestId) {
+        if (batchId !== activeBatchId || requestId !== blockRequestIds.get(blockName) || !card.isConnected) {
           return;
         }
-        render(data);
-        hideLoaders();
+        renderBlock(payload.data);
+        setCardLoaded(card);
         return;
       } catch (err) {
         window.clearTimeout(timeoutId);
         lastError = err;
-        if (thisRequestId !== activeRequestId) {
+        if (batchId !== activeBatchId || requestId !== blockRequestIds.get(blockName)) {
           return;
         }
         if (attempt < maxAttempts) {
@@ -210,12 +248,20 @@
       }
     }
 
-    if (thisRequestId !== activeRequestId) {
+    if (batchId !== activeBatchId || requestId !== blockRequestIds.get(blockName)) {
       return;
     }
     if (lastError) {
-      setLoadError();
+      setCardLoadError(card);
     }
+  }
+
+  function loadMetrics() {
+    activeBatchId += 1;
+    const batchId = activeBatchId;
+    document.querySelectorAll('.dashboard-async-card[data-block]').forEach((card) => {
+      loadBlockMetrics(card, batchId);
+    });
   }
 
   function init() {

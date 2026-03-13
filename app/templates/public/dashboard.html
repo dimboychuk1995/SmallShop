@@ -167,6 +167,7 @@
 
 <script>
   window.DASHBOARD_METRICS_API_URL = "{{ dashboard_metrics_api_url }}";
+  window.DASHBOARD_METRICS_BLOCK_API_TEMPLATE = "{{ url_for('dashboard.dashboard_metrics_block_api', block_name='__BLOCK__') }}";
   (function bootDashboardMetricsInit() {
     var attempts = 0;
     function run() {

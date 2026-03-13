@@ -104,9 +104,12 @@
 		let orderItems = [];
 		let currentOrderStatus = null;
 
-			if (!vendorSelect || !vendorSearchInput || !vendorDropdown || !partSearch || !dropdown || !itemsBody || !createOrderBtn || !createdOrderId || !orderCreatedBox || !orderAlert || !orderTotalAmount || !nonInventoryBody) {
-			return;
-		}
+		const canUseOrderComposer = !!(
+			vendorSelect && vendorSearchInput && vendorDropdown && partSearch && dropdown && itemsBody &&
+			createOrderBtn && createdOrderId && orderCreatedBox && orderAlert && orderTotalAmount && nonInventoryBody
+		);
+
+		if (canUseOrderComposer) {
 
 		const vendorOptions = Array.from(vendorSelect.options)
 			.filter((opt) => opt.value)
@@ -279,9 +282,9 @@
 		const partsOrderPaymentMethodInput = document.getElementById("partsOrderPaymentMethodInput");
 		const partsOrderPaymentNotesInput = document.getElementById("partsOrderPaymentNotesInput");
 		const partsOrderPaymentSubmitBtn = document.getElementById("partsOrderPaymentSubmitBtn");
-		const partsPageRootMarker = document.getElementById("orderModal") || document.getElementById("createPartModal");
 
 		function isPartsPageAlive() {
+			const partsPageRootMarker = document.getElementById("orderModal") || document.getElementById("createPartModal");
 			return !!(partsPageRootMarker && document.body && document.body.contains(partsPageRootMarker));
 		}
 
@@ -295,6 +298,70 @@
 				throw new Error((data && (data.error || data.message)) || "Failed to load payment summary");
 			}
 			return data;
+		}
+
+		async function loadOrderIntoModal(orderId) {
+			if (!orderId) return;
+
+			const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}`, {
+				method: "GET",
+				headers: { "Accept": "application/json" },
+			});
+			if (!res.ok) {
+				showError("Failed to load order");
+				return;
+			}
+
+			const data = await res.json();
+			if (!data.ok || !data.order) {
+				showError("Order not found");
+				return;
+			}
+
+			const order = data.order;
+			currentOrderStatus = order.status;
+			const isReceived = order.status === "received";
+			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = isReceived ? "none" : "block";
+			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = isReceived ? "block" : "none";
+
+			if (isReceived) {
+				vendorSelect.disabled = true;
+				vendorSearchInput.disabled = true;
+				partSearch.disabled = true;
+				createOrderBtn.disabled = true;
+			} else {
+				vendorSelect.disabled = false;
+				vendorSearchInput.disabled = false;
+				partSearch.disabled = !vendorSelect.value;
+				createOrderBtn.disabled = false;
+			}
+
+			vendorSelect.value = order.vendor_id || "";
+			syncVendorSearchFromSelect();
+			orderItems = [];
+			const rawItems = Array.isArray(order.items)
+				? order.items
+				: (Array.isArray(order.parts) ? order.parts : []);
+			if (rawItems.length > 0) {
+				orderItems = rawItems.map(item => ({
+					part_id: item.part_id,
+					part_number: item.part_number,
+					description: item.description,
+					quantity: item.quantity ?? item.qty ?? 0,
+					price: item.price ?? item.cost ?? 0,
+					core_has_charge: item.core_has_charge || false,
+					core_cost: item.core_cost || 0
+				}));
+			}
+
+			const nonInventoryLines = Array.isArray(order.non_inventory_amounts)
+				? order.non_inventory_amounts
+				: [];
+			renderOrderItems();
+			renderNonInventoryRows(nonInventoryLines, isReceived);
+			createdOrderId.value = orderId;
+			orderCreatedBox.classList.add("d-none");
+			createOrderBtn.textContent = "Save";
 		}
 
 		document.addEventListener("click", async function (e) {
@@ -846,69 +913,7 @@
 			if (!orderId) return;
 
 			try {
-				const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}`);
-				if (!res.ok) {
-					showError("Failed to load order");
-					return;
-				}
-
-				const data = await res.json();
-				if (!data.ok || !data.order) {
-					showError("Order not found");
-					return;
-				}
-
-				const order = data.order;			
-			currentOrderStatus = order.status;
-			// Show/hide receive/unreceive buttons based on status
-			const isReceived = order.status === "received";
-			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = isReceived ? "none" : "block";
-			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = isReceived ? "block" : "none";
-			
-			// Prevent editing received orders
-			if (isReceived) {
-				vendorSelect.disabled = true;
-				vendorSearchInput.disabled = true;
-				partSearch.disabled = true;
-				createOrderBtn.disabled = true;
-			} else {
-				vendorSelect.disabled = false;
-				vendorSearchInput.disabled = false;
-				partSearch.disabled = !vendorSelect.value;
-				createOrderBtn.disabled = false;
-			}
-			
-			// Set vendor
-				vendorSelect.value = order.vendor_id || "";
-				syncVendorSearchFromSelect();
-				// Clear current items
-				orderItems = [];
-				// Load items from order (supports legacy payloads)
-				const rawItems = Array.isArray(order.items)
-					? order.items
-					: (Array.isArray(order.parts) ? order.parts : []);
-				if (rawItems.length > 0) {
-					orderItems = rawItems.map(item => ({
-						part_id: item.part_id,
-						part_number: item.part_number,
-						description: item.description,
-						quantity: item.quantity ?? item.qty ?? 0,
-						price: item.price ?? item.cost ?? 0,
-						core_has_charge: item.core_has_charge || false,
-						core_cost: item.core_cost || 0
-					}));
-				}
-
-				const nonInventoryLines = Array.isArray(order.non_inventory_amounts)
-					? order.non_inventory_amounts
-					: [];
-				// Render items
-				renderOrderItems();
-				renderNonInventoryRows(nonInventoryLines, isReceived);
-				// Mark as editing
-				createdOrderId.value = orderId;
-				orderCreatedBox.classList.add("d-none");
-				createOrderBtn.textContent = "Save";
+				await loadOrderIntoModal(orderId);
 			} catch (err) {
 				showError("Network error while loading order");
 			}
@@ -1055,6 +1060,13 @@
 			if (partHistoryWorkOrdersBody) partHistoryWorkOrdersBody.innerHTML = `<tr><td colspan="7" class="text-muted">No data.</td></tr>`;
 		});
 
+		partHistoryModal?.addEventListener("show.bs.modal", function (e) {
+			const trigger = e.relatedTarget;
+			const partId = String(trigger?.getAttribute("data-part-id") || "").trim();
+			if (!partId) return;
+			loadPartHistory(partId);
+		});
+
 		document.addEventListener("show.bs.modal", function (e) {
 			if (!isPartsPageAlive()) return;
 			if (!e.target || e.target.id !== "orderModal") return;
@@ -1062,6 +1074,12 @@
 			const trigger = e.relatedTarget;
 			const isEditOpen = !!(trigger && trigger.classList && trigger.classList.contains("editOrderBtn"));
 			if (isEditOpen) {
+				const orderId = String(trigger?.getAttribute("data-order-id") || "").trim();
+				if (orderId) {
+					loadOrderIntoModal(orderId).catch(function () {
+						showError("Network error while loading order");
+					});
+				}
 				return;
 			}
 
@@ -1149,28 +1167,88 @@
 				return;
 			}
 		});
+		}
 
 	// ---- Edit Part Modal Logic ----
 	const createPartModal = document.getElementById('createPartModal');
 	if (createPartModal) {
 		const editingPartId = document.getElementById('editingPartId');
 		const modalTitle = document.getElementById('createPartModalLabel');
-		const partNumberInput = document.querySelector('input[name="part_number"]');
-		const descriptionInput = document.querySelector('input[name="description"]');
-		const referenceInput = document.querySelector('input[name="reference"]');
-		const vendorSelectParts = document.querySelector('select[name="vendor_id"]');
-		const categorySelect = document.querySelector('select[name="category_id"]');
-		const locationSelect = document.querySelector('select[name="location_id"]');
+		const partNumberInput = createPartModal.querySelector('input[name="part_number"]');
+		const descriptionInput = createPartModal.querySelector('input[name="description"]');
+		const referenceInput = createPartModal.querySelector('input[name="reference"]');
+		const vendorSelectParts = createPartModal.querySelector('select[name="vendor_id"]');
+		const categorySelect = createPartModal.querySelector('select[name="category_id"]');
+		const locationSelect = createPartModal.querySelector('select[name="location_id"]');
 		const inStockGroup = document.getElementById('inStockGroup');
-		const inStockInput = document.querySelector('input[name="in_stock"]');
-		const averageCostInput = document.querySelector('input[name="average_cost"]');
+		const inStockInput = createPartModal.querySelector('input[name="in_stock"]');
+		const averageCostInput = createPartModal.querySelector('input[name="average_cost"]');
 		const doNotTrackInventoryCheckbox = document.getElementById('doNotTrackInventoryToggle');
 		const coreCheckbox = document.getElementById('coreChargeToggle');
-		const coreCostInput = document.querySelector('input[name="core_cost"]');
+		const coreCostInput = createPartModal.querySelector('input[name="core_cost"]');
 		const coreCostGroup = document.getElementById('coreCostGroup');
 		const miscCheckbox = document.getElementById('miscChargeToggle');
 		const miscBodyParts = document.getElementById('miscChargesBody');
-		const form = document.querySelector('form[action*="/parts/create"]');
+		const form = createPartModal.querySelector('form[action*="/parts/create"]');
+
+		async function loadPartIntoEditModal(partId) {
+			if (!partId) return;
+
+			const res = await fetch(`/parts/api/${encodeURIComponent(partId)}`, {
+				method: 'GET',
+				headers: { 'Accept': 'application/json' }
+			});
+			const data = await res.json();
+			if (!res.ok || !data.ok || !data.item) {
+				throw new Error((data && (data.error || data.message)) || 'Failed to load part data');
+			}
+
+			const item = data.item;
+			editingPartId.value = partId;
+			modalTitle.textContent = 'Edit part: ' + item.part_number;
+
+			partNumberInput.value = item.part_number;
+			descriptionInput.value = item.description;
+			referenceInput.value = item.reference;
+			vendorSelectParts.value = item.vendor_id;
+			categorySelect.value = item.category_id;
+			locationSelect.value = item.location_id;
+			inStockInput.value = item.in_stock;
+			averageCostInput.value = item.average_cost;
+			if (doNotTrackInventoryCheckbox) {
+				doNotTrackInventoryCheckbox.checked = !!item.do_not_track_inventory;
+			}
+			syncInStockVisibility();
+
+			if (coreCheckbox) coreCheckbox.checked = item.core_has_charge;
+			if (coreCostInput) coreCostInput.value = item.core_cost;
+			syncInStockVisibility();
+
+			miscCheckbox.checked = item.misc_has_charge;
+			if (miscBodyParts) {
+				miscBodyParts.innerHTML = '';
+				if (item.misc_charges && item.misc_charges.length > 0) {
+					item.misc_charges.forEach((charge, idx) => {
+						const tr = document.createElement('tr');
+						tr.dataset.index = String(idx);
+						tr.innerHTML = `
+							<td>
+								<input class="form-control form-control-sm misc-desc" name="misc_charges[${idx}][description]" value="${charge.description || ''}" maxlength="200" />
+							</td>
+							<td class="text-end">
+								<input class="form-control form-control-sm text-end misc-price" name="misc_charges[${idx}][price]" type="number" min="0" step="0.01" value="${charge.price || ''}" />
+							</td>
+							<td class="text-end">
+								<button type="button" class="btn btn-sm btn-outline-danger remove-misc-btn">Remove</button>
+							</td>
+						`;
+						miscBodyParts.appendChild(tr);
+					});
+				}
+			}
+
+			document.getElementById('miscChargesGroup').style.display = item.misc_has_charge ? '' : 'none';
+		}
 
 		function syncInStockVisibility() {
 			const hide = !!(doNotTrackInventoryCheckbox && doNotTrackInventoryCheckbox.checked);
@@ -1206,70 +1284,19 @@
 			const partId = btn.getAttribute('data-part-id');
 			if (!partId) return;
 
-			// Fetch part data
-			fetch(`/parts/api/${encodeURIComponent(partId)}`, {
-				method: 'GET',
-				headers: { 'Accept': 'application/json' }
-			})
-			.then(res => res.json())
-			.then(data => {
-				if (!data.ok || !data.item) {
-					alert('Failed to load part data');
-					return;
-				}
+			loadPartIntoEditModal(partId).catch(err => {
+				console.error('Error loading part:', err);
+				alert('Error loading part data');
+			});
+		});
 
-				const item = data.item;
-
-				// Set editing mode
-				editingPartId.value = partId;
-				modalTitle.textContent = 'Edit part: ' + item.part_number;
-
-				// Fill form with data
-				partNumberInput.value = item.part_number;
-				descriptionInput.value = item.description;
-				referenceInput.value = item.reference;
-				vendorSelectParts.value = item.vendor_id;
-				categorySelect.value = item.category_id;
-				locationSelect.value = item.location_id;
-				inStockInput.value = item.in_stock;
-				averageCostInput.value = item.average_cost;
-				if (doNotTrackInventoryCheckbox) {
-					doNotTrackInventoryCheckbox.checked = !!item.do_not_track_inventory;
-				}
-				syncInStockVisibility();
-
-				// Core charge
-				if (coreCheckbox) coreCheckbox.checked = item.core_has_charge;
-				if (coreCostInput) coreCostInput.value = item.core_cost;
-				syncInStockVisibility();
-
-				// Misc charges
-				miscCheckbox.checked = item.misc_has_charge;
-				if (miscBodyParts) {
-					miscBodyParts.innerHTML = '';
-					if (item.misc_charges && item.misc_charges.length > 0) {
-						item.misc_charges.forEach((charge, idx) => {
-							const tr = document.createElement('tr');
-							tr.dataset.index = String(idx);
-							tr.innerHTML = `
-								<td>
-									<input class="form-control form-control-sm misc-desc" name="misc_charges[${idx}][description]" value="${charge.description || ''}" maxlength="200" />
-								</td>
-								<td class="text-end">
-									<input class="form-control form-control-sm text-end misc-price" name="misc_charges[${idx}][price]" type="number" min="0" step="0.01" value="${charge.price || ''}" />
-								</td>
-								<td class="text-end">
-									<button type="button" class="btn btn-sm btn-outline-danger remove-misc-btn">Remove</button>
-								</td>
-							`;
-							miscBodyParts.appendChild(tr);
-						});
-					}
-				}
-
-				document.getElementById('miscChargesGroup').style.display = item.misc_has_charge ? '' : 'none';
-			})
-			.catch(err => {
+		createPartModal.addEventListener('show.bs.modal', function (e) {
+			const trigger = e.relatedTarget;
+			const isEditOpen = !!(trigger && trigger.classList && trigger.classList.contains('editPartBtn'));
+			if (!isEditOpen) return;
+			const partId = String(trigger.getAttribute('data-part-id') || '').trim();
+			if (!partId) return;
+			loadPartIntoEditModal(partId).catch(err => {
 				console.error('Error loading part:', err);
 				alert('Error loading part data');
 			});
