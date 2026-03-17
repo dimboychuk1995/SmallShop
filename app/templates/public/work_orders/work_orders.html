@@ -360,6 +360,11 @@
         </div>
 
         <div class="mb-3">
+          <label class="form-label">Payment Date</label>
+          <input type="date" id="paymentListDateInput" class="form-control" value="{{ today_date_input_value or '' }}">
+        </div>
+
+        <div class="mb-3">
           <label class="form-label">Notes (optional)</label>
           <textarea id="paymentListNotesInput" class="form-control" rows="2" placeholder="e.g., Check #12345, etc."></textarea>
         </div>
@@ -373,5 +378,5 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/work_orders/work_orders.js', v='20260316-payments-delete') }}"></script>
+<script src="{{ url_for('static', filename='js/work_orders/work_orders.js', v='20260317-work-order-dates') }}"></script>
 {% endblock %}

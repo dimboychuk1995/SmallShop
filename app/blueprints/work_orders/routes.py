@@ -13,7 +13,13 @@ from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.mongo_search import build_regex_search_filter
 from app.utils.parts_search import build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
-from app.utils.display_datetime import format_date_mmddyyyy
+from app.utils.display_datetime import (
+    format_date_mmddyyyy,
+    format_preferred_shop_date,
+    get_active_shop_today_iso,
+    shop_date_input_value,
+    shop_local_date_to_utc,
+)
 from app.utils.date_filters import build_date_range_filters
 
 
@@ -748,6 +754,25 @@ def build_created_at_range_filter(created_from=None, created_to_exclusive=None):
     return {"created_at": created_filter}
 
 
+def build_preferred_date_range_filter(date_field: str, created_from=None, created_to_exclusive=None):
+    created_filter = build_created_at_range_filter(created_from, created_to_exclusive)
+    if not created_filter:
+        return None
+
+    range_filter = created_filter["created_at"]
+    return {
+        "$or": [
+            {date_field: range_filter},
+            {date_field: {"$exists": False}, "created_at": range_filter},
+            {date_field: None, "created_at": range_filter},
+        ]
+    }
+
+
+def format_preferred_date_label(primary_dt, fallback_dt):
+    return format_preferred_shop_date(primary_dt, fallback=fallback_dt)
+
+
 def get_work_orders_totals(shop_db, query: dict):
     pipeline = [
         {"$match": query},
@@ -852,7 +877,7 @@ def get_work_orders_list(
     elif search_filter:
         query = {"$and": [query, search_filter]}
 
-    created_at_filter = build_created_at_range_filter(created_from, created_to_exclusive)
+    created_at_filter = build_preferred_date_range_filter("work_order_date", created_from, created_to_exclusive)
     if created_at_filter:
         query = append_and_filter(query, created_at_filter)
 
@@ -861,7 +886,7 @@ def get_work_orders_list(
     rows, pagination = paginate_find(
         shop_db.work_orders,
         query,
-        [("created_at", -1)],
+        [("work_order_date", -1), ("created_at", -1)],
         page,
         per_page,
     )
@@ -894,7 +919,7 @@ def get_work_orders_list(
                 "id": str(x.get("_id")),
                 "wo_number": x.get("wo_number"),
                 "customer": customers_map.get(x.get("customer_id")) or "-",
-                "date": format_dt_label(x.get("created_at")),
+                "date": format_preferred_date_label(x.get("work_order_date"), x.get("created_at")),
                 "unit": units_map.get(x.get("unit_id")) or "-",
                 "labor_total": labor_total,
                 "parts_total": parts_total,
@@ -976,14 +1001,14 @@ def get_estimates_list(
     elif search_filter:
         query = {"$and": [query, search_filter]}
 
-    created_at_filter = build_created_at_range_filter(created_from, created_to_exclusive)
+    created_at_filter = build_preferred_date_range_filter("work_order_date", created_from, created_to_exclusive)
     if created_at_filter:
         query = append_and_filter(query, created_at_filter)
 
     rows, pagination = paginate_find(
         shop_db.work_orders,
         query,
-        [("created_at", -1)],
+        [("work_order_date", -1), ("created_at", -1)],
         page,
         per_page,
     )
@@ -1016,7 +1041,7 @@ def get_estimates_list(
                 "id": str(x.get("_id")),
                 "wo_number": x.get("wo_number"),
                 "customer": customers_map.get(x.get("customer_id")) or "-",
-                "date": format_dt_label(x.get("created_at")),
+                "date": format_preferred_date_label(x.get("work_order_date"), x.get("created_at")),
                 "unit": units_map.get(x.get("unit_id")) or "-",
                 "labor_total": labor_total,
                 "parts_total": parts_total,
@@ -1385,6 +1410,8 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
         "work_order_created": bool((form_state or {}).get("work_order_created")),
         "created_work_order_id": (form_state or {}).get("created_work_order_id") or "",
         "wo_number": (form_state or {}).get("wo_number"),
+        "work_order_date": (form_state or {}).get("work_order_date") or get_active_shop_today_iso(),
+        "today_date_input_value": get_active_shop_today_iso(),
 
         "initial_labors": (form_state or {}).get("initial_labors") or [],
         "initial_totals": normalize_totals_payload((form_state or {}).get("initial_totals") or {}),
@@ -1877,6 +1904,7 @@ def work_orders_page():
         date_from=date_from,
         date_to=date_to,
         date_preset=date_preset,
+        today_date_input_value=get_active_shop_today_iso(),
     )
 
 
@@ -1914,6 +1942,7 @@ def work_order_details_page():
                 "work_order_created": True,
                 "created_work_order_id": str(wo.get("_id")),
                 "wo_number": wo.get("wo_number"),
+                "work_order_date": shop_date_input_value(wo.get("work_order_date") or wo.get("created_at"), default_today=True),
                 "initial_labors": normalize_saved_labors(wo.get("labors") or wo.get("blocks") or [], shop_db=shop_db),
                 "initial_totals": wo.get("totals")
                 or {
@@ -2107,6 +2136,7 @@ def create_work_order():
             totals = {}
 
     totals = align_totals_with_labors(normalize_totals_payload(totals), labors)
+    work_order_date = shop_local_date_to_utc(request.form.get("work_order_date"), default_today=True)
 
     now = utcnow()
     user_id = current_user_id()
@@ -2148,6 +2178,7 @@ def create_work_order():
         "unit_id": unit_id,
         "status": "open",
         "labors": labors,
+        "work_order_date": work_order_date,
 
         # ✅ store totals from UI
         "totals": totals,
@@ -2424,6 +2455,7 @@ def api_work_order_update(work_order_id):
     labors = data.get("labors", data.get("blocks"))
     totals = normalize_totals_payload(data.get("totals") or {})
     unit_mileage = data.get("unit_mileage")
+    work_order_date = shop_local_date_to_utc(data.get("work_order_date"), default_today=True)
 
     if not isinstance(labors, list):
         return jsonify({"ok": False, "error": "labors_required"}), 200
@@ -2474,6 +2506,7 @@ def api_work_order_update(work_order_id):
         {
             "$set": {
                 "labors": labors,
+                "work_order_date": work_order_date,
                 "totals": totals,  # ✅ сохраняем totals от фронта
                 # ✅ update inventory tracking
                 "inventory_adjusted_at": now,
@@ -2526,6 +2559,7 @@ def api_work_order_payment(work_order_id):
     amount = f64(data.get("amount"))
     payment_method = (data.get("payment_method") or "").strip() or "cash"
     notes = (data.get("notes") or "").strip()
+    payment_date = shop_local_date_to_utc(data.get("payment_date"), default_today=True)
 
     if amount is None or not (isinstance(amount, (int, float)) and amount > 0):
         return jsonify({"ok": False, "error": "invalid_amount"}), 200
@@ -2556,6 +2590,7 @@ def api_work_order_payment(work_order_id):
         "amount": round2(amount),
         "payment_method": payment_method,
         "notes": notes,
+        "payment_date": payment_date,
         "is_active": True,
         "created_at": now,
         "created_by": user_id,
@@ -2759,13 +2794,13 @@ def api_get_all_payments():
     elif payments_search:
         payments_query = {"$and": [payments_query, payments_search]}
 
-    created_at_filter = build_created_at_range_filter(created_from, created_to_exclusive)
+    created_at_filter = build_preferred_date_range_filter("payment_date", created_from, created_to_exclusive)
     if created_at_filter:
         payments_query = append_and_filter(payments_query, created_at_filter)
 
     payments = list(
         shop_db.work_order_payments.find(payments_query)
-        .sort([("created_at", -1)])
+        .sort([("payment_date", -1), ("created_at", -1)])
         .limit(500)
     )
 
@@ -2806,6 +2841,7 @@ def api_get_all_payments():
             "amount": round2(p.get("amount") or 0),
             "payment_method": p.get("payment_method") or "cash",
             "notes": p.get("notes") or "",
+            "payment_date": (p.get("payment_date") or p.get("created_at")).isoformat() if (p.get("payment_date") or p.get("created_at")) else "",
             "created_at": p.get("created_at").isoformat() if p.get("created_at") else "",
         }
         for p in payments

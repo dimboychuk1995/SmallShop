@@ -13,7 +13,13 @@ from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.mongo_search import build_regex_search_filter
 from app.utils.parts_search import build_parts_search_terms, build_query_tokens, part_matches_query
 from app.utils.permissions import permission_required
-from app.utils.display_datetime import format_date_mmddyyyy
+from app.utils.display_datetime import (
+    format_date_mmddyyyy,
+    format_preferred_shop_date,
+    get_active_shop_today_iso,
+    shop_date_input_value,
+    shop_local_date_to_utc,
+)
 from app.utils.date_filters import build_date_range_filters
 
 from . import parts_bp
@@ -442,6 +448,10 @@ def _fmt_dt_label(dt) -> str:
     return format_date_mmddyyyy(dt)
 
 
+def _fmt_preferred_dt_label(primary_dt, fallback_dt) -> str:
+    return format_preferred_shop_date(primary_dt, fallback=fallback_dt)
+
+
 def _parse_iso_date_utc(value: str):
     raw = str(value or "").strip()
     if not raw:
@@ -457,6 +467,24 @@ def _to_iso_date(value):
     if not value:
         return ""
     return value.strftime("%Y-%m-%d")
+
+
+def _build_preferred_date_filter(date_field: str, created_from=None, created_to_exclusive=None):
+    created_filter = {}
+    if created_from:
+        created_filter["$gte"] = created_from
+    if created_to_exclusive:
+        created_filter["$lt"] = created_to_exclusive
+    if not created_filter:
+        return None
+
+    return {
+        "$or": [
+            {date_field: created_filter},
+            {date_field: {"$exists": False}, "created_at": created_filter},
+            {date_field: None, "created_at": created_filter},
+        ]
+    }
 
 
 def _start_of_week_monday(value):
@@ -753,13 +781,13 @@ def parts_page():
     if orders_coll is not None and active_tab == "orders":
         orders_query = {"shop_id": shop["_id"], "is_active": {"$ne": False}}
 
-        created_filter = {}
-        if date_filters["created_from"]:
-            created_filter["$gte"] = date_filters["created_from"]
-        if date_filters["created_to_exclusive"]:
-            created_filter["$lt"] = date_filters["created_to_exclusive"]
+        created_filter = _build_preferred_date_filter(
+            "order_date",
+            date_filters["created_from"],
+            date_filters["created_to_exclusive"],
+        )
         if created_filter:
-            orders_query["created_at"] = created_filter
+            orders_query = {"$and": [orders_query, created_filter]}
 
         orders_search_filter = build_regex_search_filter(
             q,
@@ -785,7 +813,7 @@ def parts_page():
         orders_rows, orders_pagination = paginate_find(
             orders_coll,
             orders_query,
-            [("created_at", -1)],
+            [("order_date", -1), ("created_at", -1)],
             orders_page_num,
             orders_per_page,
             projection={
@@ -793,6 +821,7 @@ def parts_page():
                 "vendor_id": 1,
                 "order_number": 1,
                 "status": 1,
+                "order_date": 1,
                 "created_at": 1,
                 "items": 1,
                 "non_inventory_amounts": 1,
@@ -854,7 +883,8 @@ def parts_page():
                 "remaining_balance": float(payment_summary.get("remaining_balance") or 0.0),
                 "items_count": len(order.get("items") or []),
                 "total_amount": amounts.get("total_amount") or 0.0,
-                "created_at": _fmt_dt_label(order.get("created_at")),
+                "created_at": _fmt_preferred_dt_label(order.get("order_date"), order.get("created_at")),
+                "order_date": shop_date_input_value(order.get("order_date") or order.get("created_at"), default_today=True),
             })
 
     # Payments tab list
@@ -864,13 +894,13 @@ def parts_page():
     if payments_coll is not None and orders_coll is not None and active_tab == "payments":
         payments_query = {"shop_id": shop["_id"], "is_active": True}
 
-        created_filter = {}
-        if date_filters["created_from"]:
-            created_filter["$gte"] = date_filters["created_from"]
-        if date_filters["created_to_exclusive"]:
-            created_filter["$lt"] = date_filters["created_to_exclusive"]
+        created_filter = _build_preferred_date_filter(
+            "payment_date",
+            date_filters["created_from"],
+            date_filters["created_to_exclusive"],
+        )
         if created_filter:
-            payments_query["created_at"] = created_filter
+            payments_query = {"$and": [payments_query, created_filter]}
 
         payments_search_filter = build_regex_search_filter(
             q,
@@ -923,7 +953,7 @@ def parts_page():
         payment_rows, payments_pagination = paginate_find(
             payments_coll,
             payments_query,
-            [("created_at", -1)],
+            [("payment_date", -1), ("created_at", -1)],
             payments_page_num,
             payments_per_page,
         )
@@ -961,7 +991,7 @@ def parts_page():
                     "amount": float(_parse_float(pay.get("amount"), default=0.0)),
                     "payment_method": str(pay.get("payment_method") or "cash"),
                     "notes": str(pay.get("notes") or ""),
-                    "created_at": _fmt_dt_label(pay.get("created_at")),
+                    "created_at": _fmt_preferred_dt_label(pay.get("payment_date"), pay.get("created_at")),
                 }
             )
 
@@ -1028,6 +1058,7 @@ def parts_page():
         date_preset=date_preset,
         date_from=date_from,
         date_to=date_to,
+        today_date_input_value=get_active_shop_today_iso(),
     )
 
 
@@ -1169,6 +1200,7 @@ def parts_create():
 
     now = utcnow()
     user_oid = _oid(session.get(SESSION_USER_ID))
+    order_date = shop_local_date_to_utc(data.get("order_date"), default_today=True)
 
     doc = {
         "part_number": part_number,
@@ -1432,6 +1464,7 @@ def parts_api_orders_create():
         "items": items,
         "non_inventory_amounts": non_inventory_amounts,
         "status": "ordered",
+        "order_date": order_date,
         "payment_status": "unpaid",
         "paid_amount": 0.0,
         "remaining_balance": float(_parts_order_amounts({"items": items, "non_inventory_amounts": non_inventory_amounts}).get("total_amount") or 0.0),
@@ -1551,6 +1584,7 @@ def parts_api_orders_get(order_id: str):
                 if isinstance(x, dict)
             ],
             "payment_summary": payment_summary,
+            "order_date": shop_date_input_value(order.get("order_date") or order.get("created_at"), default_today=True),
             "created_at": _fmt_dt_iso(order.get("created_at")),
         }
     })
@@ -1640,6 +1674,7 @@ def parts_api_orders_update(order_id: str):
 
     now = utcnow()
     user_oid = _oid(session.get(SESSION_USER_ID))
+    order_date = shop_local_date_to_utc(data.get("order_date"), default_today=True)
 
     # Update order
     orders_coll.update_one(
@@ -1649,6 +1684,7 @@ def parts_api_orders_update(order_id: str):
                 "vendor_id": vendor_oid,
                 "items": items,
                 "non_inventory_amounts": non_inventory_amounts,
+                "order_date": order_date,
                 "updated_at": now,
                 "updated_by": user_oid,
             }
@@ -1681,6 +1717,7 @@ def parts_api_orders_payment(order_id: str):
     amount = _parse_float(data.get("amount"), default=-1.0)
     payment_method = str(data.get("payment_method") or "").strip() or "cash"
     notes = str(data.get("notes") or "").strip()
+    payment_date = shop_local_date_to_utc(data.get("payment_date"), default_today=True)
 
     if amount <= 0:
         return jsonify({"ok": False, "error": "invalid_amount"}), 400
@@ -1708,6 +1745,7 @@ def parts_api_orders_payment(order_id: str):
         "amount": float(round(amount + 1e-12, 2)),
         "payment_method": payment_method,
         "notes": notes,
+        "payment_date": payment_date,
         "is_active": True,
         "created_at": now,
         "created_by": user_oid,
@@ -1762,6 +1800,7 @@ def parts_api_orders_payments(order_id: str):
             "amount": float(_parse_float(p.get("amount"), default=0.0)),
             "payment_method": str(p.get("payment_method") or "cash"),
             "notes": str(p.get("notes") or ""),
+            "payment_date": _fmt_dt_iso(p.get("payment_date") or p.get("created_at")),
             "created_at": _fmt_dt_iso(p.get("created_at")),
         }
         for p in payments

@@ -1974,8 +1974,10 @@
     const unitYearInput = $("unitYearInput");
     const unitTypeInput = $("unitTypeInput");
     const vinLoadingSpinner = $("vinLoadingSpinner");
-      const unitMileageInput = $("unitMileageInput");
+    const unitMileageInput = $("unitMileageInput");
     const unitMileageHidden = $("unitMileageHidden");
+    const workOrderDateInput = $("workOrderDateInput");
+    const paymentDateInput = $("paymentDateInput");
 
     const assignMechanicsModal = $("assignMechanicsModal");
     const assignMechanicsTbody = $("assignMechanicsTbody");
@@ -2676,7 +2678,12 @@
 
         await apiPostJson(
           `/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/update`,
-          { labors, totals, unit_mileage: unit_mileage ? unit_mileage : undefined }
+          {
+            labors,
+            totals,
+            unit_mileage: unit_mileage ? unit_mileage : undefined,
+            work_order_date: workOrderDateInput ? String(workOrderDateInput.value || "").trim() : undefined,
+          }
         );
 
         // после сохранения снова лочим
@@ -2712,6 +2719,9 @@
         document.getElementById("paymentAmountInput").value = remainingBalance > 0 ? remainingBalance.toFixed(2) : "";
         document.getElementById("paymentMethodInput").value = "cash";
         document.getElementById("paymentNotesInput").value = "";
+        if (paymentDateInput) {
+          paymentDateInput.value = paymentDateInput.defaultValue || paymentDateInput.value || "";
+        }
 
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById("paymentModal"));
@@ -2772,9 +2782,15 @@
       const amount = parseFloat(document.getElementById("paymentAmountInput").value || "0");
       const paymentMethod = document.getElementById("paymentMethodInput").value;
       const notes = document.getElementById("paymentNotesInput").value;
+      const paymentDate = paymentDateInput ? String(paymentDateInput.value || "").trim() : "";
 
       if (amount <= 0) {
         toast("Please enter a valid payment amount.");
+        return;
+      }
+
+      if (!paymentDate) {
+        toast("Please select payment date.");
         return;
       }
 
@@ -2790,7 +2806,8 @@
           body: JSON.stringify({
             amount,
             payment_method: paymentMethod,
-            notes
+            notes,
+            payment_date: paymentDate
           })
         });
 

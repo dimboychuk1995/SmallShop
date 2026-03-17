@@ -97,6 +97,10 @@
       document.getElementById("paymentListAmountInput").value = remainingBalance > 0 ? remainingBalance.toFixed(2) : "";
       document.getElementById("paymentListMethodInput").value = "cash";
       document.getElementById("paymentListNotesInput").value = "";
+      const paymentDateInput = document.getElementById("paymentListDateInput");
+      if (paymentDateInput) {
+        paymentDateInput.value = paymentDateInput.defaultValue || paymentDateInput.value || "";
+      }
 
       // Show modal
       const modal = new bootstrap.Modal(document.getElementById("paymentModalList"));
@@ -117,9 +121,15 @@
     const amount = parseFloat(document.getElementById("paymentListAmountInput").value || "0");
     const paymentMethod = document.getElementById("paymentListMethodInput").value;
     const notes = document.getElementById("paymentListNotesInput").value;
+    const paymentDate = String(document.getElementById("paymentListDateInput")?.value || "").trim();
 
     if (amount <= 0) {
       alert("Please enter a valid payment amount.");
+      return;
+    }
+
+    if (!paymentDate) {
+      alert("Please select payment date.");
       return;
     }
 
@@ -132,7 +142,8 @@
       const data = await postJson(`/work_orders/api/work_orders/${encodeURIComponent(currentWorkOrderId)}/payment`, {
         amount,
         payment_method: paymentMethod,
-        notes
+        notes,
+        payment_date: paymentDate,
       });
 
       // Close modal
@@ -237,7 +248,7 @@
 
       allPaymentsData.forEach(payment => {
         try {
-          const createdAt = formatDateMMDDYYYY(payment.created_at);
+          const createdAt = formatDateMMDDYYYY(payment.payment_date || payment.created_at);
 
           const woNumber = String(payment.wo_number || "").trim() || "—";
           const customer = String(payment.customer || "").trim() || "—";

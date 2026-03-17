@@ -16,7 +16,7 @@ from app.utils.auth import (
 from app.utils.pagination import get_pagination_params, paginate_find
 from app.utils.mongo_search import build_regex_search_filter
 from app.utils.permissions import permission_required
-from app.utils.display_datetime import format_date_mmddyyyy
+from app.utils.display_datetime import format_date_mmddyyyy, format_preferred_shop_date
 from app.utils.date_filters import build_date_range_filters
 
 
@@ -121,6 +121,25 @@ def _build_created_at_range_filter(created_from=None, created_to_exclusive=None)
     if not created_filter:
         return None
     return {"created_at": created_filter}
+
+
+def _build_preferred_date_range_filter(date_field: str, created_from=None, created_to_exclusive=None):
+    created_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+    if not created_filter:
+        return None
+
+    range_filter = created_filter["created_at"]
+    return {
+        "$or": [
+            {date_field: range_filter},
+            {date_field: {"$exists": False}, "created_at": range_filter},
+            {date_field: None, "created_at": range_filter},
+        ]
+    }
+
+
+def _fmt_preferred_dt_label(primary_dt, fallback_dt):
+    return format_preferred_shop_date(primary_dt, fallback=fallback_dt)
 
 
 def _get_customer_work_orders_totals(shop_db, query: dict):
@@ -538,7 +557,7 @@ def customer_details_page(customer_id):
         if wo_search:
             wo_query = {"$and": [wo_query, wo_search]}
 
-        created_at_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+        created_at_filter = _build_preferred_date_range_filter("work_order_date", created_from, created_to_exclusive)
         if created_at_filter:
             wo_query = _append_and_filter(wo_query, created_at_filter)
 
@@ -547,12 +566,13 @@ def customer_details_page(customer_id):
         work_orders, tab_pagination = paginate_find(
             shop_db.work_orders,
             wo_query,
-            [("created_at", -1)],
+            [("work_order_date", -1), ("created_at", -1)],
             page,
             per_page,
             projection={
                 "wo_number": 1,
                 "status": 1,
+                "work_order_date": 1,
                 "created_at": 1,
                 "totals": 1,
                 "grand_total": 1,
@@ -580,7 +600,7 @@ def customer_details_page(customer_id):
                     "id": str(wo_id),
                     "wo_number": wo.get("wo_number") or "-",
                     "status": (wo.get("status") or "open").strip().lower(),
-                    "created_at": _fmt_dt_label(wo.get("created_at")),
+                    "created_at": _fmt_preferred_dt_label(wo.get("work_order_date"), wo.get("created_at")),
                     "unit": units_map.get(wo.get("unit_id")) or "-",
                     "grand_total": grand_total,
                     "paid_amount": paid_amount,
@@ -673,7 +693,7 @@ def customer_details_page(customer_id):
             elif payments_search:
                 payments_query = {"$and": [payments_query, payments_search]}
 
-            created_at_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+            created_at_filter = _build_preferred_date_range_filter("payment_date", created_from, created_to_exclusive)
             if created_at_filter:
                 payments_query = _append_and_filter(payments_query, created_at_filter)
 
@@ -682,7 +702,7 @@ def customer_details_page(customer_id):
             payments, tab_pagination = paginate_find(
                 shop_db.work_order_payments,
                 payments_query,
-                [("created_at", -1)],
+                [("payment_date", -1), ("created_at", -1)],
                 page,
                 per_page,
                 projection={
@@ -690,6 +710,7 @@ def customer_details_page(customer_id):
                     "amount": 1,
                     "payment_method": 1,
                     "notes": 1,
+                    "payment_date": 1,
                     "created_at": 1,
                 },
             )
@@ -703,7 +724,7 @@ def customer_details_page(customer_id):
                         "amount": _round2(p.get("amount")),
                         "payment_method": (p.get("payment_method") or "cash").replace("_", " "),
                         "notes": p.get("notes") or "",
-                        "created_at": _fmt_dt_label(p.get("created_at")),
+                        "created_at": _fmt_preferred_dt_label(p.get("payment_date"), p.get("created_at")),
                     }
                 )
         else:
@@ -726,7 +747,7 @@ def customer_details_page(customer_id):
         if estimate_search:
             estimate_query = {"$and": [estimate_query, estimate_search]}
 
-        created_at_filter = _build_created_at_range_filter(created_from, created_to_exclusive)
+        created_at_filter = _build_preferred_date_range_filter("work_order_date", created_from, created_to_exclusive)
         if created_at_filter:
             estimate_query = _append_and_filter(estimate_query, created_at_filter)
 
@@ -735,12 +756,13 @@ def customer_details_page(customer_id):
         estimates, tab_pagination = paginate_find(
             shop_db.work_orders,
             estimate_query,
-            [("created_at", -1)],
+            [("work_order_date", -1), ("created_at", -1)],
             page,
             per_page,
             projection={
                 "wo_number": 1,
                 "status": 1,
+                "work_order_date": 1,
                 "created_at": 1,
                 "totals": 1,
                 "grand_total": 1,
@@ -760,7 +782,7 @@ def customer_details_page(customer_id):
                     "id": str(wo.get("_id")),
                     "wo_number": wo.get("wo_number") or "-",
                     "status": (wo.get("status") or "estimate").strip().lower(),
-                    "created_at": _fmt_dt_label(wo.get("created_at")),
+                    "created_at": _fmt_preferred_dt_label(wo.get("work_order_date"), wo.get("created_at")),
                     "unit": units_map.get(wo.get("unit_id")) or "-",
                     "grand_total": _order_grand_total(wo),
                 }
@@ -845,12 +867,13 @@ def customer_unit_details_page(customer_id, unit_id):
         rows, pagination = paginate_find(
             shop_db.work_orders,
             wo_query,
-            [("created_at", -1)],
+            [("work_order_date", -1), ("created_at", -1)],
             page,
             per_page,
             projection={
                 "wo_number": 1,
                 "status": 1,
+                "work_order_date": 1,
                 "created_at": 1,
                 "totals": 1,
                 "grand_total": 1,
@@ -873,7 +896,7 @@ def customer_unit_details_page(customer_id, unit_id):
                     "id": str(row_id),
                     "wo_number": row.get("wo_number") or "-",
                     "status": (row.get("status") or "open").strip().lower(),
-                    "created_at": _fmt_dt_label(row.get("created_at")),
+                    "created_at": _fmt_preferred_dt_label(row.get("work_order_date"), row.get("created_at")),
                     "grand_total": grand_total,
                     "paid_amount": paid_amount,
                     "remaining_balance": remaining,

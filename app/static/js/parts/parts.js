@@ -97,6 +97,7 @@
 		const orderCreatedBox = document.getElementById("orderCreatedBox");
 		const orderAlert = document.getElementById("orderAlert");
 		const orderTotalAmount = document.getElementById("orderTotalAmount");
+		const orderDateInput = document.getElementById("orderDateInput");
 		const receiveOrderModalBtn = document.getElementById("receiveOrderModalBtn");
 		const unreceiveOrderModalBtn = document.getElementById("unreceiveOrderModalBtn");
 		const nonInventoryBody = document.getElementById("nonInventoryBody");
@@ -287,6 +288,7 @@
 		const partsOrderPaymentRemainingBalance = document.getElementById("partsOrderPaymentRemainingBalance");
 		const partsOrderPaymentAmountInput = document.getElementById("partsOrderPaymentAmountInput");
 		const partsOrderPaymentMethodInput = document.getElementById("partsOrderPaymentMethodInput");
+		const partsOrderPaymentDateInput = document.getElementById("partsOrderPaymentDateInput");
 		const partsOrderPaymentNotesInput = document.getElementById("partsOrderPaymentNotesInput");
 		const partsOrderPaymentSubmitBtn = document.getElementById("partsOrderPaymentSubmitBtn");
 
@@ -382,6 +384,10 @@
 				: [];
 			renderOrderItems();
 			renderNonInventoryRows(nonInventoryLines, isReceived);
+			if (orderDateInput) {
+				orderDateInput.value = String(order.order_date || orderDateInput.defaultValue || "").trim();
+				orderDateInput.disabled = isReceived;
+			}
 			createdOrderId.value = orderId;
 			orderCreatedBox.classList.add("d-none");
 			createOrderBtn.textContent = "Save";
@@ -430,6 +436,9 @@
 					? Number(data.remaining_balance).toFixed(2)
 					: "";
 				partsOrderPaymentMethodInput.value = "cash";
+				if (partsOrderPaymentDateInput) {
+					partsOrderPaymentDateInput.value = partsOrderPaymentDateInput.defaultValue || partsOrderPaymentDateInput.value || "";
+				}
 				partsOrderPaymentNotesInput.value = "";
 
 				if (partsOrderPaymentModalEl) {
@@ -452,7 +461,13 @@
 			}
 
 			const method = String(partsOrderPaymentMethodInput?.value || "cash").trim() || "cash";
+			const paymentDate = String(partsOrderPaymentDateInput?.value || "").trim();
 			const notes = String(partsOrderPaymentNotesInput?.value || "").trim();
+
+			if (!paymentDate) {
+				alert("Select payment date.");
+				return;
+			}
 
 			const originalText = partsOrderPaymentSubmitBtn.textContent;
 			partsOrderPaymentSubmitBtn.disabled = true;
@@ -462,7 +477,7 @@
 				const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/payment`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json", "Accept": "application/json" },
-					body: JSON.stringify({ amount, payment_method: method, notes }),
+					body: JSON.stringify({ amount, payment_method: method, payment_date: paymentDate, notes }),
 				});
 				const data = await res.json();
 				if (!res.ok || !data || !data.ok) {
@@ -809,7 +824,9 @@
 			clearError();
 
 			const vendorId = vendorSelect.value || "";
+			const orderDate = String(orderDateInput?.value || "").trim();
 			if (!vendorId) { showError("Select vendor."); return; }
+			if (!orderDate) { showError("Select order date."); return; }
 
 			const rows = Array.from(itemsBody.querySelectorAll("tr[data-part-id]"));
 
@@ -852,7 +869,7 @@
 				const res = await fetch(endpoint, {
 					method: method,
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ vendor_id: vendorId, items, non_inventory_amounts: nonInventoryPayload.lines }),
+					body: JSON.stringify({ vendor_id: vendorId, order_date: orderDate, items, non_inventory_amounts: nonInventoryPayload.lines }),
 				});
 				const data = await res.json();
 
@@ -990,6 +1007,10 @@
 			vendorSelect.disabled = false;
 			vendorSearchInput.value = "";
 			vendorSearchInput.disabled = false;
+			if (orderDateInput) {
+				orderDateInput.value = orderDateInput.defaultValue || "";
+				orderDateInput.disabled = false;
+			}
 			hideVendorDropdown();
 			partSearch.value = "";
 			partSearch.disabled = true;

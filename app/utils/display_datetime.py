@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 from bson import ObjectId
@@ -151,6 +151,55 @@ def to_active_shop_datetime(value):
         return dt.astimezone(tz)
     except Exception:
         return dt
+
+
+def get_active_shop_today() -> date:
+    tz = _safe_tzinfo(get_active_shop_timezone_name())
+    return datetime.now(tz).date()
+
+
+def get_active_shop_today_iso() -> str:
+    return get_active_shop_today().strftime("%Y-%m-%d")
+
+
+def shop_local_date_to_utc(value, default_today: bool = False):
+    tz = _safe_tzinfo(get_active_shop_timezone_name())
+
+    local_date = None
+    if isinstance(value, datetime):
+        localized = to_active_shop_datetime(value)
+        if localized:
+            local_date = localized.date()
+    elif isinstance(value, date):
+        local_date = value
+    else:
+        raw = str(value or "").strip()
+        if raw:
+            try:
+                local_date = datetime.strptime(raw, "%Y-%m-%d").date()
+            except Exception:
+                local_date = None
+
+    if local_date is None:
+        if not default_today:
+            return None
+        local_date = get_active_shop_today()
+
+    local_dt = datetime.combine(local_date, time.min, tzinfo=tz)
+    return local_dt.astimezone(timezone.utc)
+
+
+def shop_date_input_value(value, default_today: bool = False) -> str:
+    dt = shop_local_date_to_utc(value, default_today=default_today)
+    localized = to_active_shop_datetime(dt) if dt else None
+    if not localized:
+        return ""
+    return localized.strftime("%Y-%m-%d")
+
+
+def format_preferred_shop_date(value, fallback=None, default: str = "-") -> str:
+    dt = value if isinstance(value, datetime) else fallback
+    return format_date_mmddyyyy(dt, default=default)
 
 
 def format_date_mmddyyyy(value, default: str = "-") -> str:
