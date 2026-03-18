@@ -318,6 +318,112 @@
 		}
 	}
 
+	function pad2(value) {
+		return String(value).padStart(2, "0");
+	}
+
+	function toYmd(date) {
+		return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate());
+	}
+
+	function cloneDate(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+	}
+
+	function startOfWeekMonday(date) {
+		var d = cloneDate(date);
+		var day = d.getDay();
+		var diff = (day + 6) % 7;
+		d.setDate(d.getDate() - diff);
+		return d;
+	}
+
+	function startOfMonth(date) {
+		return new Date(date.getFullYear(), date.getMonth(), 1);
+	}
+
+	function startOfQuarter(date) {
+		var month = date.getMonth();
+		var quarterStartMonth = Math.floor(month / 3) * 3;
+		return new Date(date.getFullYear(), quarterStartMonth, 1);
+	}
+
+	function startOfYear(date) {
+		return new Date(date.getFullYear(), 0, 1);
+	}
+
+	function updateDateInputValue(input, ymd) {
+		if (!input) return;
+		input.value = ymd || "";
+		if (input._flatpickr) {
+			input._flatpickr.setDate(ymd || null, false, "Y-m-d");
+		}
+	}
+
+	function applyDatePresetToForm(form, presetValue) {
+		if (!form) return;
+		var fromInput = form.querySelector('input[name="date_from"]');
+		var toInput = form.querySelector('input[name="date_to"]');
+		if (!fromInput || !toInput) return;
+
+		var preset = String(presetValue || "").trim().toLowerCase();
+		if (!preset || preset === "custom") {
+			return;
+		}
+
+		if (preset === "all_time") {
+			updateDateInputValue(fromInput, "");
+			updateDateInputValue(toInput, "");
+			return;
+		}
+
+		var today = new Date();
+		today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+		var fromDate = null;
+		var toDate = cloneDate(today);
+
+		if (preset === "today") {
+			fromDate = cloneDate(today);
+			toDate = cloneDate(today);
+		} else if (preset === "yesterday") {
+			fromDate = cloneDate(today);
+			fromDate.setDate(fromDate.getDate() - 1);
+			toDate = cloneDate(fromDate);
+		} else if (preset === "this_week") {
+			fromDate = startOfWeekMonday(today);
+		} else if (preset === "last_week") {
+			var thisWeekStart = startOfWeekMonday(today);
+			fromDate = cloneDate(thisWeekStart);
+			fromDate.setDate(fromDate.getDate() - 7);
+			toDate = cloneDate(thisWeekStart);
+			toDate.setDate(toDate.getDate() - 1);
+		} else if (preset === "this_month") {
+			fromDate = startOfMonth(today);
+		} else if (preset === "last_month") {
+			var thisMonthStart = startOfMonth(today);
+			toDate = cloneDate(thisMonthStart);
+			toDate.setDate(toDate.getDate() - 1);
+			fromDate = startOfMonth(toDate);
+		} else if (preset === "this_quarter") {
+			fromDate = startOfQuarter(today);
+		} else if (preset === "last_quarter") {
+			var thisQuarterStart = startOfQuarter(today);
+			toDate = cloneDate(thisQuarterStart);
+			toDate.setDate(toDate.getDate() - 1);
+			fromDate = startOfQuarter(toDate);
+		} else if (preset === "this_year") {
+			fromDate = startOfYear(today);
+		} else if (preset === "last_year") {
+			var thisYearStart = startOfYear(today);
+			toDate = cloneDate(thisYearStart);
+			toDate.setDate(toDate.getDate() - 1);
+			fromDate = startOfYear(toDate);
+		}
+
+		updateDateInputValue(fromInput, fromDate ? toYmd(fromDate) : "");
+		updateDateInputValue(toInput, toDate ? toYmd(toDate) : "");
+	}
+
 	function setupAutoSearch(form) {
 		if (form.dataset.autoSearchBound === "1") {
 			return;
@@ -367,14 +473,7 @@
 				return;
 			}
 			if (target.name === "date_preset") {
-				var dateFromInput = form.querySelector('input[name="date_from"]');
-				var dateToInput = form.querySelector('input[name="date_to"]');
-				if (dateFromInput) {
-					dateFromInput.value = "";
-				}
-				if (dateToInput) {
-					dateToInput.value = "";
-				}
+				applyDatePresetToForm(form, target.value);
 			}
 			if (target.name === "date_from" || target.name === "date_to") {
 				var presetSelect = form.querySelector('select[name="date_preset"]');
@@ -572,10 +671,89 @@
 		}, true);
 	}
 
+	function bindDateInputPickerOpen() {
+		if (document.body.dataset.datePickerOpenBound === "1") {
+			return;
+		}
+		document.body.dataset.datePickerOpenBound = "1";
+
+		function tryOpenDatePicker(input) {
+			if (!(input instanceof HTMLInputElement)) return;
+			if (input.type !== "date") return;
+			if (input.disabled || input.readOnly) return;
+
+			if (typeof input.showPicker === "function") {
+				try {
+					input.showPicker();
+				} catch (e) {
+					// Some browsers block showPicker in specific contexts.
+				}
+			}
+		}
+
+		document.addEventListener("click", function (event) {
+			var target = event && event.target;
+			if (!(target instanceof HTMLInputElement)) return;
+			if (target.type !== "date") return;
+			tryOpenDatePicker(target);
+		});
+
+		document.addEventListener("keydown", function (event) {
+			var target = event && event.target;
+			if (!(target instanceof HTMLInputElement)) return;
+			if (target.type !== "date") return;
+
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault();
+				tryOpenDatePicker(target);
+			}
+		});
+	}
+
+	function initDatePickers(root) {
+		if (typeof window.flatpickr !== "function") {
+			return;
+		}
+
+		var scope = (root && root.querySelectorAll) ? root : document;
+		var dateInputs = scope.querySelectorAll('input[type="date"]:not([data-no-flatpickr])');
+
+		for (var i = 0; i < dateInputs.length; i += 1) {
+			var input = dateInputs[i];
+			if (input.dataset.flatpickrBound === "1") {
+				continue;
+			}
+
+			input.dataset.flatpickrBound = "1";
+			input.classList.add("ss-date-input");
+			input.type = "text";
+			input.setAttribute("autocomplete", "off");
+
+			window.flatpickr(input, {
+				dateFormat: "Y-m-d",
+				altInput: true,
+				altFormat: "m/d/Y",
+				allowInput: true,
+				clickOpens: true,
+				disableMobile: true,
+				monthSelectorType: "static",
+				altInputClass: "form-control ss-date-input",
+				prevArrow: "<span aria-hidden=\"true\">&#x2039;</span>",
+				nextArrow: "<span aria-hidden=\"true\">&#x203A;</span>",
+			});
+		}
+	}
+
 	document.addEventListener("DOMContentLoaded", function () {
 		bindAutoSearchForms();
 		bindSidebarNavigation();
 		bindGlobalInputConstraints();
+		bindDateInputPickerOpen();
+		initDatePickers(document);
 		updateSidebarActiveState(window.location.pathname);
+	});
+
+	window.addEventListener("smallshop:content-replaced", function () {
+		initDatePickers(document);
 	});
 })();
