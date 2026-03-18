@@ -666,6 +666,17 @@ def format_dt_label(dt):
     return format_date_mmddyyyy(dt)
 
 
+def _fmt_dt_iso(dt):
+    if isinstance(dt, datetime):
+        try:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).isoformat()
+        except Exception:
+            return dt.isoformat()
+    return ""
+
+
 def _parse_iso_date_utc(value: str):
     raw = str(value or "").strip()
     if not raw:
@@ -2636,7 +2647,7 @@ def api_get_work_order_payments(work_order_id):
 
     payments = list(
         shop_db.work_order_payments.find({"work_order_id": wo_id, "is_active": True})
-        .sort([("created_at", -1)])
+        .sort([("payment_date", -1), ("created_at", -1)])
     )
 
     summary = _build_work_order_payment_summary(wo, sum(round2(p.get("amount") or 0) for p in payments))
@@ -2647,13 +2658,19 @@ def api_get_work_order_payments(work_order_id):
             "amount": round2(p.get("amount") or 0),
             "payment_method": p.get("payment_method") or "cash",
             "notes": p.get("notes") or "",
-            "created_at": p.get("created_at").isoformat() if p.get("created_at") else "",
+            "payment_date": _fmt_dt_iso(p.get("payment_date") or p.get("created_at")),
+            "payment_date_label": format_preferred_date_label(p.get("payment_date"), p.get("created_at")),
+            "created_at": _fmt_dt_iso(p.get("created_at")),
         }
         for p in payments
     ]
 
     return jsonify({
         "ok": True,
+        "work_order_date": _fmt_dt_iso(wo.get("work_order_date") or wo.get("created_at")),
+        "work_order_date_label": format_preferred_date_label(wo.get("work_order_date"), wo.get("created_at")),
+        "created_at": _fmt_dt_iso(wo.get("created_at")),
+        "created_at_label": format_dt_label(wo.get("created_at")),
         "grand_total": summary["grand_total"],
         "paid_amount": summary["paid_amount"],
         "remaining_balance": summary["remaining_balance"],

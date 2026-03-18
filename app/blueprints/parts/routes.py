@@ -438,7 +438,9 @@ def _name_from_doc(doc: dict) -> str:
 def _fmt_dt_iso(dt) -> str:
     if isinstance(dt, datetime):
         try:
-            return dt.astimezone().isoformat()
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).isoformat()
         except Exception:
             return dt.isoformat()
     return ""
@@ -1453,6 +1455,7 @@ def parts_api_orders_create():
 
     now = utcnow()
     user_oid = _oid(session.get(SESSION_USER_ID))
+    order_date = shop_local_date_to_utc(data.get("order_date"), default_today=True)
 
     # Get next order number
     shop_db = orders_coll.database
@@ -1586,6 +1589,7 @@ def parts_api_orders_get(order_id: str):
             "payment_summary": payment_summary,
             "order_date": shop_date_input_value(order.get("order_date") or order.get("created_at"), default_today=True),
             "created_at": _fmt_dt_iso(order.get("created_at")),
+            "received_at": _fmt_dt_iso(order.get("received_at")),
         }
     })
 
@@ -1613,7 +1617,7 @@ def parts_api_orders_update(order_id: str):
         return jsonify({"ok": False, "error": "Order not found"}), 404
 
     # Don't allow updating received orders
-    if order.get("status") == "received":
+    if str(order.get("status") or "").strip().lower() == "received":
         return jsonify({"ok": False, "error": "Cannot update received orders"}), 400
 
     data = request.get_json(silent=True) or {}
@@ -1717,7 +1721,11 @@ def parts_api_orders_payment(order_id: str):
     amount = _parse_float(data.get("amount"), default=-1.0)
     payment_method = str(data.get("payment_method") or "").strip() or "cash"
     notes = str(data.get("notes") or "").strip()
-    payment_date = shop_local_date_to_utc(data.get("payment_date"), default_today=True)
+    # For received orders payment date is locked to active shop "today".
+    if str(order.get("status") or "").strip().lower() == "received":
+        payment_date = shop_local_date_to_utc(None, default_today=True)
+    else:
+        payment_date = shop_local_date_to_utc(data.get("payment_date"), default_today=True)
 
     if amount <= 0:
         return jsonify({"ok": False, "error": "invalid_amount"}), 400
@@ -1788,7 +1796,7 @@ def parts_api_orders_payments(order_id: str):
 
     payments_coll = orders_coll.database.parts_order_payments
     payments = list(
-        payments_coll.find({"parts_order_id": oid, "is_active": True}).sort([("created_at", -1)])
+        payments_coll.find({"parts_order_id": oid, "is_active": True}).sort([("payment_date", -1), ("created_at", -1)])
     )
 
     paid_amount = _sum_active_order_payments(payments_coll, oid)
@@ -1811,6 +1819,10 @@ def parts_api_orders_payments(order_id: str):
             "ok": True,
             "order_id": str(order.get("_id")),
             "order_number": order.get("order_number"),
+            "order_status": str(order.get("status") or "ordered"),
+            "order_date": _fmt_dt_iso(order.get("order_date") or order.get("created_at")),
+            "created_at": _fmt_dt_iso(order.get("created_at")),
+            "received_at": _fmt_dt_iso(order.get("received_at")),
             "grand_total": float(summary.get("total_amount") or 0.0),
             "paid_amount": float(summary.get("paid_amount") or 0.0),
             "remaining_balance": float(summary.get("remaining_balance") or 0.0),

@@ -288,11 +288,14 @@
                     </td>
                     <td>{{ o.created_at }}</td>
                     <td class="text-end">
-                      <button type="button" class="btn btn-sm btn-outline-success js-order-payment"
-                              data-order-id="{{ o.id }}" data-order-number="{{ o.order_number or '-' }}"
-                              title="Record payment">
-                        <i class="bi bi-cash-coin me-1"></i> Pay
-                      </button>
+                      {% if (o.payment_status or '')|lower != 'paid' %}
+                        <button type="button" class="btn btn-sm btn-outline-success js-order-payment"
+                                data-order-id="{{ o.id }}" data-order-number="{{ o.order_number or '-' }}"
+                                data-payment-status="{{ o.payment_status or 'unpaid' }}"
+                                title="Record payment">
+                          <i class="bi bi-cash-coin me-1"></i> Pay
+                        </button>
+                      {% endif %}
                             <button type="button" class="btn btn-sm btn-outline-primary editOrderBtn" 
                               data-order-id="{{ o.id }}"
                               data-order-json='{{ o | tojson | forceescape }}'
@@ -885,16 +888,57 @@
           </div>
         </div>
 
+        <div id="orderDatesBlock" class="border border-2 border-success-subtle rounded-3 p-3 p-lg-4 mt-3 bg-success-subtle shadow-sm d-none">
+          <div class="small text-muted mb-2">Order timeline</div>
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-md-6">
+              <div class="border rounded p-2 bg-white h-100">
+                <div class="small text-muted">Created</div>
+                <div class="fw-semibold" id="orderMetaCreated">-</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="border rounded p-2 bg-white h-100">
+                <div class="small text-muted">Received</div>
+                <div class="fw-semibold" id="orderMetaReceived">-</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="small text-muted mb-1">Paid</div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th class="text-end">Amount</th>
+                    <th>Method</th>
+                    <th>Notes</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="orderMetaPaymentsBody">
+                  <tr><td colspan="5" class="text-muted">No payments.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <input type="hidden" id="createdOrderId" value="">
       </div>
 
       <div class="modal-footer">
-        <div class="me-auto">
+        <div class="me-auto d-flex align-items-center gap-2 flex-wrap">
           <button type="button" class="btn btn-sm btn-outline-success" id="receiveOrderModalBtn" style="display:none;">
             <i class="bi bi-check-circle me-1"></i> Receive Order
           </button>
           <button type="button" class="btn btn-sm btn-outline-warning" id="unreceiveOrderModalBtn" style="display:none;">
             <i class="bi bi-arrow-counterclockwise me-1"></i> Unreceive Order
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="payOrderModalBtn" style="display:none;">
+            <i class="bi bi-cash-stack me-1"></i> Paid
           </button>
         </div>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
@@ -968,6 +1012,6 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/parts/parts.js', v='20260317-parts-dates') }}"></script>
+<script src="{{ url_for('static', filename='js/parts/parts.js', v='20260317-parts-table-paid-hide') }}"></script>
 
 {% endblock %}

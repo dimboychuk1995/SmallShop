@@ -2,6 +2,7 @@
   "use strict";
 
   let coreChargeDefaultEnabled = true;
+  const APP_TIMEZONE = document.body?.dataset?.appTimezone || "UTC";
 
   function $(id) { return document.getElementById(id); }
 
@@ -41,6 +42,23 @@
   function toast(msg) {
     // если у тебя есть SweetAlert — можно заменить на Swal.fire(...)
     alert(msg);
+  }
+
+  function formatDateLabel(value) {
+    if (!value) return "-";
+    const raw = String(value).trim();
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+      return `${dateOnly[2]}/${dateOnly[3]}/${dateOnly[1]}`;
+    }
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) return "-";
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: APP_TIMEZONE,
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric",
+    }).format(dt);
   }
 
   // ---------------- pricing ----------------
@@ -1978,6 +1996,9 @@
     const unitMileageHidden = $("unitMileageHidden");
     const workOrderDateInput = $("workOrderDateInput");
     const paymentDateInput = $("paymentDateInput");
+    const workOrderDatesBlock = $("workOrderDatesBlock");
+    const woMetaCreated = $("woMetaCreated");
+    const woMetaPaymentsBody = $("woMetaPaymentsBody");
 
     const assignMechanicsModal = $("assignMechanicsModal");
     const assignMechanicsTbody = $("assignMechanicsTbody");
@@ -1991,6 +2012,52 @@
     };
 
     let targetAssignBlock = null;
+
+    async function loadWorkOrderTimeline() {
+      if (!isCreated || !workOrderId || !workOrderDatesBlock || !woMetaPaymentsBody) return;
+
+      try {
+        const res = await fetch(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/payments`, {
+          method: "GET",
+          headers: { "Accept": "application/json" }
+        });
+        const data = await res.json();
+        if (!res.ok || !data || !data.ok) {
+          throw new Error((data && (data.error || data.message)) || "Failed to load timeline");
+        }
+
+        workOrderDatesBlock.style.display = "";
+        if (woMetaCreated) {
+          woMetaCreated.textContent = data.created_at_label || formatDateLabel(data.created_at);
+        }
+
+        const payments = Array.isArray(data.payments) ? data.payments : [];
+        if (!payments.length) {
+          woMetaPaymentsBody.innerHTML = `<tr><td colspan="5" class="text-muted">No payments.</td></tr>`;
+          return;
+        }
+
+        woMetaPaymentsBody.innerHTML = payments.map((p) => {
+          const pid = String(p.id || "");
+          const amount = Number(p.amount || 0);
+          const method = String(p.payment_method || "cash");
+          const notes = String(p.notes || "");
+          const dateLabel = p.payment_date_label || formatDateLabel(p.payment_date || p.created_at);
+          return `
+            <tr>
+              <td>${escapeText(dateLabel)}</td>
+              <td class="text-end fw-semibold">$${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}</td>
+              <td>${escapeText(method)}</td>
+              <td>${notes ? escapeText(notes) : "-"}</td>
+              <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger js-delete-wo-payment-inline" data-payment-id="${escapeText(pid)}">Delete</button></td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        workOrderDatesBlock.style.display = "";
+        woMetaPaymentsBody.innerHTML = `<tr><td colspan="5" class="text-danger">Failed to load payment data.</td></tr>`;
+      }
+    }
 
     function setAssignError(message) {
       if (!assignMechanicsError) return;
@@ -2627,7 +2694,7 @@
     if (createdInfo && createdInfo.created && createdInfo.id) {
       isCreated = true;
       workOrderId = String(createdInfo.id);
-      workOrderStatus = String(createdInfo.status || "open");
+      workOrderStatus = String(createdInfo.status || "open").trim().toLowerCase();
     }
 
     function applyStateFromStatus() {
@@ -2739,9 +2806,43 @@
         await apiPostJson(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/status`, { status: "open" });
         workOrderStatus = "open";
         applyStateFromStatus();
+        await loadWorkOrderTimeline();
         toast("Marked as unpaid.");
       } catch (e) {
         toast(e.message || "Failed to set unpaid.");
+      }
+    });
+
+    document.addEventListener("click", async function (event) {
+      const btn = event.target.closest(".js-delete-wo-payment-inline");
+      if (!btn) return;
+      if (!isCreated || !workOrderId) return;
+
+      const paymentId = String(btn.dataset.paymentId || "").trim();
+      if (!paymentId) return;
+      if (!window.confirm("Delete this payment?")) return;
+
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Deleting...";
+
+      try {
+        const res = await fetch(`/work_orders/api/payments/${encodeURIComponent(paymentId)}/delete`, {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+        });
+        const data = await res.json();
+        if (!res.ok || !data || !data.ok) {
+          throw new Error((data && (data.error || data.message)) || "Failed to delete payment");
+        }
+
+        workOrderStatus = (data.status || "open").toLowerCase();
+        applyStateFromStatus();
+        await loadWorkOrderTimeline();
+      } catch (err) {
+        toast(err.message || "Failed to delete payment.");
+        btn.disabled = false;
+        btn.textContent = originalText;
       }
     });
 
@@ -2772,6 +2873,8 @@
           }
         }
       })();
+
+      loadWorkOrderTimeline();
     }
 
     // Payment modal handler
@@ -2822,7 +2925,12 @@
         if (data.is_fully_paid) {
           workOrderStatus = "paid";
           applyStateFromStatus();
+        } else {
+          workOrderStatus = "open";
+          applyStateFromStatus();
         }
+
+        await loadWorkOrderTimeline();
 
         toast("Payment recorded successfully!");
       } catch (e) {

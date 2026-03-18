@@ -98,9 +98,15 @@
 		const orderAlert = document.getElementById("orderAlert");
 		const orderTotalAmount = document.getElementById("orderTotalAmount");
 		const orderDateInput = document.getElementById("orderDateInput");
+		const orderDatesBlock = document.getElementById("orderDatesBlock");
+		const orderMetaCreated = document.getElementById("orderMetaCreated");
+		const orderMetaReceived = document.getElementById("orderMetaReceived");
+		const orderMetaPaymentsBody = document.getElementById("orderMetaPaymentsBody");
+		const payOrderModalBtn = document.getElementById("payOrderModalBtn");
 		const receiveOrderModalBtn = document.getElementById("receiveOrderModalBtn");
 		const unreceiveOrderModalBtn = document.getElementById("unreceiveOrderModalBtn");
 		const nonInventoryBody = document.getElementById("nonInventoryBody");
+		const orderModal = document.getElementById("orderModal");
 
 		let orderItems = [];
 		let currentOrderStatus = null;
@@ -274,6 +280,29 @@
 			return `$${Number.isFinite(x) ? x.toFixed(2) : "0.00"}`;
 		}
 
+		function setDateInputLocked(input, isLocked) {
+			if (!input) return;
+			const locked = !!isLocked;
+
+			input.disabled = locked;
+			input.readOnly = locked;
+
+			const fp = input._flatpickr;
+			if (!fp) return;
+
+			if (fp.input) {
+				fp.input.disabled = locked;
+				fp.input.readOnly = locked;
+			}
+			if (fp.altInput) {
+				fp.altInput.disabled = locked;
+				fp.altInput.readOnly = locked;
+			}
+
+			fp.set("clickOpens", !locked);
+			fp.set("allowInput", !locked);
+		}
+
 		function getBootstrapModalClass() {
 			if (window.bootstrap && window.bootstrap.Modal) return window.bootstrap.Modal;
 			if (typeof bootstrap !== "undefined" && bootstrap.Modal) return bootstrap.Modal;
@@ -292,6 +321,72 @@
 		const partsOrderPaymentNotesInput = document.getElementById("partsOrderPaymentNotesInput");
 		const partsOrderPaymentSubmitBtn = document.getElementById("partsOrderPaymentSubmitBtn");
 
+		function formatDateTime(v) {
+			if (!v) return "-";
+			const raw = String(v).trim();
+			const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+			if (dateOnly) {
+				return `${dateOnly[2]}/${dateOnly[3]}/${dateOnly[1]}`;
+			}
+			const d = new Date(raw);
+			if (Number.isNaN(d.getTime())) return "-";
+			return new Intl.DateTimeFormat("en-US", {
+				timeZone: APP_TIMEZONE,
+				month: "2-digit",
+				day: "2-digit",
+				year: "numeric",
+			}).format(d);
+		}
+
+		async function renderOrderTimeline(orderId, orderData) {
+			if (!orderDatesBlock || !orderMetaPaymentsBody || !orderId) return;
+
+			let summary = null;
+			try {
+				summary = await loadPartsOrderPaymentSummary(orderId);
+			} catch (err) {
+				orderDatesBlock.classList.remove("d-none");
+				orderMetaPaymentsBody.innerHTML = `<tr><td colspan="5" class="text-danger">Failed to load payment data.</td></tr>`;
+				return;
+			}
+
+			orderDatesBlock.classList.remove("d-none");
+			if (orderMetaCreated) {
+				orderMetaCreated.textContent = formatDateTime((orderData && orderData.created_at) || summary.created_at);
+			}
+			if (orderMetaReceived) {
+				orderMetaReceived.textContent = formatDateTime((orderData && orderData.received_at) || summary.received_at);
+			}
+			if (payOrderModalBtn) {
+				const isPaid = String(summary.payment_status || "").toLowerCase() === "paid"
+					|| Number(summary.remaining_balance || 0) <= 0.01;
+				payOrderModalBtn.style.display = (!isPaid && orderId) ? "inline-flex" : "none";
+			}
+
+			const payments = Array.isArray(summary.payments) ? summary.payments : [];
+			if (payments.length === 0) {
+				orderMetaPaymentsBody.innerHTML = `<tr><td colspan="5" class="text-muted">No payments.</td></tr>`;
+				return;
+			}
+
+			orderMetaPaymentsBody.innerHTML = payments.map((p) => {
+				const pid = String(p.id || "");
+				const dateLabel = formatDateTime(p.payment_date || p.created_at);
+				const amount = Number(p.amount || 0);
+				const method = String(p.payment_method || "cash");
+				const notes = String(p.notes || "");
+				return `
+					<tr>
+						<td>${escapeHtml(dateLabel)}</td>
+						<td class="text-end fw-semibold">$${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}</td>
+						<td>${escapeHtml(method)}</td>
+						<td>${notes ? escapeHtml(notes) : "-"}</td>
+						<td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger js-delete-order-payment-inline" data-order-id="${escapeHtml(orderId)}" data-payment-id="${escapeHtml(pid)}">Delete</button></td>
+					</tr>
+				`;
+			}).join("");
+		}
+
 		function isPartsPageAlive() {
 			const partsPageRootMarker = document.getElementById("orderModal") || document.getElementById("createPartModal");
 			return !!(partsPageRootMarker && document.body && document.body.contains(partsPageRootMarker));
@@ -307,6 +402,31 @@
 				throw new Error((data && (data.error || data.message)) || "Failed to load payment summary");
 			}
 			return data;
+		}
+
+		async function openPartsOrderPaymentModal(orderId) {
+			if (!orderId) return;
+
+			const data = await loadPartsOrderPaymentSummary(orderId);
+			partsOrderPaymentOrderIdInput.value = orderId;
+			partsOrderPaymentOrderMeta.textContent = `Order #${data.order_number || "-"}`;
+			partsOrderPaymentInvoiceTotal.textContent = formatMoney(data.grand_total || 0);
+			partsOrderPaymentAlreadyPaid.textContent = formatMoney(data.paid_amount || 0);
+			partsOrderPaymentRemainingBalance.textContent = formatMoney(data.remaining_balance || 0);
+			partsOrderPaymentAmountInput.value = (Number(data.remaining_balance || 0) > 0)
+				? Number(data.remaining_balance).toFixed(2)
+				: "";
+			partsOrderPaymentMethodInput.value = "cash";
+			const isReceivedOrder = String(data.order_status || "").toLowerCase() === "received";
+			if (partsOrderPaymentDateInput) {
+				partsOrderPaymentDateInput.value = partsOrderPaymentDateInput.defaultValue || partsOrderPaymentDateInput.value || "";
+				setDateInputLocked(partsOrderPaymentDateInput, isReceivedOrder);
+			}
+			partsOrderPaymentNotesInput.value = "";
+
+			if (!partsOrderPaymentModalEl) return;
+			const modal = bootstrap.Modal.getOrCreateInstance(partsOrderPaymentModalEl);
+			modal.show();
 		}
 
 		async function loadOrderIntoModal(orderId) {
@@ -344,10 +464,21 @@
 
 		function applyOrderToModal(order, orderId) {
 			if (!order || typeof order !== "object") return;
-			currentOrderStatus = order.status;
-			const isReceived = order.status === "received";
+			currentOrderStatus = String(order.status || "").trim().toLowerCase();
+			const isReceived = currentOrderStatus === "received";
 			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = isReceived ? "none" : "block";
 			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = isReceived ? "block" : "none";
+			if (payOrderModalBtn) {
+				const paymentSummary = (order && typeof order.payment_summary === "object") ? order.payment_summary : null;
+				const paymentStatus = String(
+					(paymentSummary && paymentSummary.payment_status)
+					|| order.payment_status
+					|| ""
+				).toLowerCase();
+				const remaining = Number((paymentSummary && paymentSummary.remaining_balance) || order.remaining_balance || 0);
+				const isPaid = paymentStatus === "paid" || remaining <= 0.01;
+				payOrderModalBtn.style.display = (!isPaid && orderId) ? "inline-flex" : "none";
+			}
 
 			if (isReceived) {
 				vendorSelect.disabled = true;
@@ -386,11 +517,12 @@
 			renderNonInventoryRows(nonInventoryLines, isReceived);
 			if (orderDateInput) {
 				orderDateInput.value = String(order.order_date || orderDateInput.defaultValue || "").trim();
-				orderDateInput.disabled = isReceived;
+				setDateInputLocked(orderDateInput, isReceived);
 			}
 			createdOrderId.value = orderId;
 			orderCreatedBox.classList.add("d-none");
 			createOrderBtn.textContent = "Save";
+			renderOrderTimeline(orderId, order);
 		}
 
 		function parseJsonAttr(raw) {
@@ -419,32 +551,60 @@
 
 		document.addEventListener("click", async function (e) {
 			if (!isPartsPageAlive()) return;
+			const inlineDeleteBtn = e.target.closest(".js-delete-order-payment-inline");
+			if (inlineDeleteBtn) {
+				const paymentId = String(inlineDeleteBtn.getAttribute("data-payment-id") || "").trim();
+				const orderId = String(inlineDeleteBtn.getAttribute("data-order-id") || "").trim();
+				if (!paymentId || !orderId) return;
+				if (!window.confirm("Delete this payment?")) return;
+
+				const originalText = inlineDeleteBtn.textContent;
+				inlineDeleteBtn.disabled = true;
+				inlineDeleteBtn.textContent = "Deleting...";
+
+				try {
+					const res = await fetch(`/parts/api/payments/${encodeURIComponent(paymentId)}/delete`, {
+						method: "POST",
+						headers: { "Accept": "application/json" },
+					});
+					const data = await res.json();
+					if (!res.ok || !data || !data.ok) {
+						throw new Error((data && (data.message || data.error)) || "Failed to delete payment");
+					}
+					await loadOrderIntoModal(orderId);
+				} catch (err) {
+					alert(err.message || "Failed to delete payment");
+					inlineDeleteBtn.disabled = false;
+					inlineDeleteBtn.textContent = originalText;
+				}
+				return;
+			}
+
 			const btn = e.target.closest(".js-order-payment");
 			if (!btn) return;
+
+			const rowPaymentStatus = String(btn.getAttribute("data-payment-status") || "").trim().toLowerCase();
+			if (rowPaymentStatus === "paid") return;
 
 			const orderId = String(btn.getAttribute("data-order-id") || "").trim();
 			if (!orderId) return;
 
 			try {
-				const data = await loadPartsOrderPaymentSummary(orderId);
-				partsOrderPaymentOrderIdInput.value = orderId;
-				partsOrderPaymentOrderMeta.textContent = `Order #${data.order_number || "-"}`;
-				partsOrderPaymentInvoiceTotal.textContent = formatMoney(data.grand_total || 0);
-				partsOrderPaymentAlreadyPaid.textContent = formatMoney(data.paid_amount || 0);
-				partsOrderPaymentRemainingBalance.textContent = formatMoney(data.remaining_balance || 0);
-				partsOrderPaymentAmountInput.value = (Number(data.remaining_balance || 0) > 0)
-					? Number(data.remaining_balance).toFixed(2)
-					: "";
-				partsOrderPaymentMethodInput.value = "cash";
-				if (partsOrderPaymentDateInput) {
-					partsOrderPaymentDateInput.value = partsOrderPaymentDateInput.defaultValue || partsOrderPaymentDateInput.value || "";
-				}
-				partsOrderPaymentNotesInput.value = "";
+				await openPartsOrderPaymentModal(orderId);
+			} catch (err) {
+				alert(err.message || "Failed to open payment modal");
+			}
+		});
 
-				if (partsOrderPaymentModalEl) {
-					const modal = new bootstrap.Modal(partsOrderPaymentModalEl);
-					modal.show();
-				}
+		payOrderModalBtn?.addEventListener("click", async function () {
+			const orderId = String(createdOrderId?.value || "").trim();
+			if (!orderId) {
+				alert("Create order first.");
+				return;
+			}
+
+			try {
+				await openPartsOrderPaymentModal(orderId);
 			} catch (err) {
 				alert(err.message || "Failed to open payment modal");
 			}
@@ -484,9 +644,15 @@
 					throw new Error((data && (data.message || data.error)) || "Failed to save payment");
 				}
 
+				const openedOverOrderModal = !!(orderModal && orderModal.classList.contains("show"));
 				const modal = bootstrap.Modal.getInstance(partsOrderPaymentModalEl);
 				if (modal) modal.hide();
-				location.reload();
+
+				if (openedOverOrderModal) {
+					await loadOrderIntoModal(orderId);
+				} else {
+					location.reload();
+				}
 			} catch (err) {
 				alert(err.message || "Failed to save payment");
 			} finally {
@@ -1001,7 +1167,6 @@
 		}
 
 		// Reset form when modal is closed
-		const orderModal = document.getElementById("orderModal");
 		orderModal?.addEventListener("hidden.bs.modal", function () {
 			vendorSelect.value = "";
 			vendorSelect.disabled = false;
@@ -1009,7 +1174,7 @@
 			vendorSearchInput.disabled = false;
 			if (orderDateInput) {
 				orderDateInput.value = orderDateInput.defaultValue || "";
-				orderDateInput.disabled = false;
+				setDateInputLocked(orderDateInput, false);
 			}
 			hideVendorDropdown();
 			partSearch.value = "";
@@ -1025,25 +1190,40 @@
 			createOrderBtn.disabled = false;
 			if (receiveOrderModalBtn) receiveOrderModalBtn.style.display = "none";
 			if (unreceiveOrderModalBtn) unreceiveOrderModalBtn.style.display = "none";
+			if (payOrderModalBtn) payOrderModalBtn.style.display = "none";
 			if (receiveBtn) receiveBtn.disabled = false;
+			if (orderDatesBlock) orderDatesBlock.classList.add("d-none");
+			if (orderMetaCreated) orderMetaCreated.textContent = "-";
+			if (orderMetaReceived) orderMetaReceived.textContent = "-";
+			if (orderMetaPaymentsBody) orderMetaPaymentsBody.innerHTML = `<tr><td colspan="5" class="text-muted">No payments.</td></tr>`;
+		});
+
+		partsOrderPaymentModalEl?.addEventListener("shown.bs.modal", function () {
+			if (!(orderModal && orderModal.classList.contains("show"))) return;
+
+			const backdrops = document.querySelectorAll(".modal-backdrop.show");
+			if (backdrops.length > 0) {
+				const topBackdrop = backdrops[backdrops.length - 1];
+				topBackdrop.style.zIndex = "1080";
+			}
+			if (partsOrderPaymentModalEl) {
+				partsOrderPaymentModalEl.style.zIndex = "1090";
+			}
+		});
+
+		partsOrderPaymentModalEl?.addEventListener("hidden.bs.modal", function () {
+			if (partsOrderPaymentModalEl) {
+				partsOrderPaymentModalEl.style.zIndex = "";
+			}
+			if (orderModal && orderModal.classList.contains("show")) {
+				document.body.classList.add("modal-open");
+			}
 		});
 
 		const partHistoryModal = document.getElementById("partHistoryModal");
 		const partHistoryMeta = document.getElementById("partHistoryMeta");
 		const partHistoryOrdersBody = document.getElementById("partHistoryOrdersBody");
 		const partHistoryWorkOrdersBody = document.getElementById("partHistoryWorkOrdersBody");
-
-		function formatDateTime(v) {
-			if (!v) return "-";
-			const d = new Date(v);
-			if (Number.isNaN(d.getTime())) return "-";
-			return new Intl.DateTimeFormat("en-US", {
-				timeZone: APP_TIMEZONE,
-				month: "2-digit",
-				day: "2-digit",
-				year: "numeric",
-			}).format(d);
-		}
 
 		function money(n) {
 			const x = Number(n || 0);
