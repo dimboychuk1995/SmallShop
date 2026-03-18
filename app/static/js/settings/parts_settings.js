@@ -62,7 +62,7 @@
 
   function showAlert(message, type = 'info') {
     if (!cardBody) {
-      alert(message);
+      appAlert(message, type === 'danger' ? 'error' : (type || 'info'));
       return;
     }
     removeExistingAlert();

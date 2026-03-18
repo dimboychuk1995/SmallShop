@@ -558,7 +558,7 @@
 				const paymentId = String(inlineDeleteBtn.getAttribute("data-payment-id") || "").trim();
 				const orderId = String(inlineDeleteBtn.getAttribute("data-order-id") || "").trim();
 				if (!paymentId || !orderId) return;
-				if (!window.confirm("Delete this payment?")) return;
+				if (!await appConfirm("Delete this payment?")) return; // inline delete
 
 				const originalText = inlineDeleteBtn.textContent;
 				inlineDeleteBtn.disabled = true;
@@ -575,7 +575,7 @@
 					}
 					await loadOrderIntoModal(orderId);
 				} catch (err) {
-					alert(err.message || "Failed to delete payment");
+					appAlert(err.message || "Failed to delete payment", 'error');
 					inlineDeleteBtn.disabled = false;
 					inlineDeleteBtn.textContent = originalText;
 				}
@@ -594,21 +594,21 @@
 			try {
 				await openPartsOrderPaymentModal(orderId);
 			} catch (err) {
-				alert(err.message || "Failed to open payment modal");
+				appAlert(err.message || "Failed to open payment modal", 'error');
 			}
 		});
 
 		payOrderModalBtn?.addEventListener("click", async function () {
 			const orderId = String(createdOrderId?.value || "").trim();
 			if (!orderId) {
-				alert("Create order first.");
+				appAlert("Create order first.", 'warning');
 				return;
 			}
 
 			try {
 				await openPartsOrderPaymentModal(orderId);
 			} catch (err) {
-				alert(err.message || "Failed to open payment modal");
+				appAlert(err.message || "Failed to open payment modal", 'error');
 			}
 		});
 
@@ -618,7 +618,7 @@
 
 			const amount = parseFloat(partsOrderPaymentAmountInput?.value || "0");
 			if (!(amount > 0)) {
-				alert("Enter valid payment amount.");
+				appAlert("Enter valid payment amount.", 'warning');
 				return;
 			}
 
@@ -627,7 +627,7 @@
 			const notes = String(partsOrderPaymentNotesInput?.value || "").trim();
 
 			if (!paymentDate) {
-				alert("Select payment date.");
+				appAlert("Select payment date.", 'warning');
 				return;
 			}
 
@@ -656,7 +656,7 @@
 					location.reload();
 				}
 			} catch (err) {
-				alert(err.message || "Failed to save payment");
+				appAlert(err.message || "Failed to save payment", 'error');
 			} finally {
 				partsOrderPaymentSubmitBtn.disabled = false;
 				partsOrderPaymentSubmitBtn.textContent = originalText;
@@ -672,7 +672,7 @@
 			const paymentId = String(btn.getAttribute("data-payment-id") || "").trim();
 			if (!paymentId) return;
 
-			if (!window.confirm("Delete this payment?")) return;
+			if (!await appConfirm("Delete this payment?")) return;
 
 			const originalText = btn.textContent;
 			btn.disabled = true;
@@ -690,7 +690,7 @@
 
 				location.reload();
 			} catch (err) {
-				alert(err.message || "Failed to delete payment");
+				appAlert(err.message || "Failed to delete payment", 'error');
 				btn.disabled = false;
 				btn.textContent = originalText;
 			}
@@ -1074,11 +1074,29 @@
 			}
 		}
 
-		function askVendorBill(defaultValue) {
-			const initial = String(defaultValue || "").trim();
-			const value = window.prompt("Vendor Bill (invoice number). Leave blank if none.", initial);
-			if (value === null) return null;
-			return String(value || "").trim();
+		async function askVendorBill(defaultValue) {
+			if (typeof Swal === 'undefined') {
+				const value = window.prompt("Vendor Bill (invoice number). Leave blank if none.", String(defaultValue || "").trim());
+				if (value === null) return null;
+				return String(value || "").trim();
+			}
+			const noAnim = { popup: '', backdrop: '' };
+			const result = await Swal.fire({
+				title: 'Vendor Bill',
+				text: 'Enter invoice number from the vendor (leave blank if none).',
+				input: 'text',
+				inputValue: String(defaultValue || "").trim(),
+				inputPlaceholder: 'e.g. INV-12345',
+				showCancelButton: true,
+				confirmButtonText: 'Receive Order',
+				cancelButtonText: 'Cancel',
+				confirmButtonColor: '#1f6b43',
+				cancelButtonColor: '#6c757d',
+				showClass: noAnim,
+				hideClass: noAnim,
+			});
+			if (!result.isConfirmed) return null;
+			return String(result.value || "").trim();
 		}
 
 		async function receiveOrderWithVendorBill(orderId, vendorBill) {
@@ -1099,7 +1117,7 @@
 
 			const oid = createdOrderId.value || "";
 			if (!oid) { showError("Order id missing."); return; }
-			const vendorBill = askVendorBill(currentVendorBill);
+			const vendorBill = await askVendorBill(currentVendorBill);
 			if (vendorBill === null) return;
 
 			receiveBtn.disabled = true;
@@ -1129,19 +1147,19 @@
 			receiveOrderModalBtn.addEventListener("click", async function () {
 				const orderId = createdOrderId.value;
 				if (!orderId) return;
-				const vendorBill = askVendorBill(currentVendorBill);
+				const vendorBill = await askVendorBill(currentVendorBill);
 				if (vendorBill === null) return;
 
 				try {
 					const data = await receiveOrderWithVendorBill(orderId, vendorBill);
 					currentVendorBill = vendorBill;
-					alert(`Order received! ${data.updated_parts} parts updated.`);
+					appAlert(`Order received! ${data.updated_parts} parts updated.`, 'success');
 					const modalEl = document.getElementById("orderModal");
 					const modal = window.bootstrap?.Modal?.getInstance(modalEl);
 					if (modal) modal.hide();
 					location.reload();
 				} catch (err) {
-					alert(err.message || "Network error while receiving order");
+					appAlert(err.message || "Network error while receiving order", 'error');
 				}
 			});
 		}
@@ -1152,7 +1170,7 @@
 				const orderId = createdOrderId.value;
 				if (!orderId) return;
 
-				if (confirm("Unreceive this order? Items will be removed from inventory.")) {
+				if (await appConfirm("Unreceive this order? Items will be removed from inventory.")) {
 					try {
 						const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}/unreceive`, {
 							method: "POST"
@@ -1160,16 +1178,16 @@
 						const data = await res.json();
 
 						if (data.ok) {
-							alert(`Order unreceived! ${data.updated_parts} parts removed from inventory.`);
+							appAlert(`Order unreceived! ${data.updated_parts} parts removed from inventory.`, 'success');
 							const modalEl = document.getElementById("orderModal");
 							const modal = window.bootstrap?.Modal?.getInstance(modalEl);
 							if (modal) modal.hide();
 							location.reload();
 						} else {
-							alert("Error: " + (data.error || "Failed to unreceive order"));
+							appAlert("Error: " + (data.error || "Failed to unreceive order"), 'error');
 						}
 					} catch (err) {
-						alert("Network error while unreceiving order");
+						appAlert("Network error while unreceiving order", 'error');
 					}
 				}
 			});
@@ -1369,15 +1387,15 @@
 				if (!orderId) return;
 
 				const vendorBillDefault = String(receiveStatusBtn.getAttribute("data-vendor-bill") || "").trim();
-				const vendorBill = askVendorBill(vendorBillDefault);
+				const vendorBill = await askVendorBill(vendorBillDefault);
 				if (vendorBill === null) return;
 
 				try {
 					const data = await receiveOrderWithVendorBill(orderId, vendorBill);
-					alert(`Order received! ${data.updated_parts} parts updated.`);
+					appAlert(`Order received! ${data.updated_parts} parts updated.`, 'success');
 					location.reload();
 				} catch (err) {
-					alert(err.message || "Network error while receiving order");
+					appAlert(err.message || "Network error while receiving order", 'error');
 				}
 				return;
 			}
@@ -1388,7 +1406,7 @@
 				const orderId = deleteBtn.getAttribute("data-order-id");
 				if (!orderId) return;
 
-				if (confirm("Delete this order? If received, items will be removed from inventory.")) {
+				if (await appConfirm("Delete this order? If received, items will be removed from inventory.")) {
 					try {
 						const res = await fetch(`/parts/api/orders/${encodeURIComponent(orderId)}`, {
 							method: "DELETE"
@@ -1396,13 +1414,13 @@
 						const data = await res.json();
 
 						if (data.ok) {
-							alert("Order deleted successfully");
+							appAlert("Order deleted successfully", 'success');
 							location.reload();
 						} else {
-							alert("Error: " + (data.error || "Failed to delete order"));
+							appAlert("Error: " + (data.error || "Failed to delete order"), 'error');
 						}
 					} catch (err) {
-						alert("Network error while deleting order");
+						appAlert("Network error while deleting order", 'error');
 					}
 				}
 				return;
@@ -1575,7 +1593,7 @@
 			}
 			loadPartIntoEditModal(partId).catch(err => {
 				console.error('Error loading part:', err);
-				alert('Error loading part data');
+				appAlert('Error loading part data', 'error');
 			});
 		});
 
@@ -1631,11 +1649,11 @@
 							if (modal) modal.hide();
 							location.reload();
 						} else {
-							alert('Update failed: ' + (result.error || 'Unknown error'));
+							appAlert('Update failed: ' + (result.error || 'Unknown error'), 'error');
 						}
 					} catch (err) {
 						console.error('Error updating part:', err);
-						alert('Network error while updating part');
+						appAlert('Network error while updating part', 'error');
 					}
 
 					return false;

@@ -39,9 +39,15 @@
       .replaceAll("'", "&#039;");
   }
 
-  function toast(msg) {
-    // если у тебя есть SweetAlert — можно заменить на Swal.fire(...)
-    alert(msg);
+  function toast(msg, type) {
+    if (!type) {
+      var m = String(msg || '');
+      if (/success|saved\.|added\.|unpaid\./i.test(m)) type = 'success';
+      else if (/error|fail|network/i.test(m)) type = 'error';
+      else if (/please|required|cannot|invalid/i.test(m)) type = 'warning';
+      else type = 'info';
+    }
+    appAlert(msg, type);
   }
 
   function formatDateLabel(value) {
@@ -2820,7 +2826,7 @@
 
       const paymentId = String(btn.dataset.paymentId || "").trim();
       if (!paymentId) return;
-      if (!window.confirm("Delete this payment?")) return;
+      if (!await appConfirm("Delete this payment?")) return;
 
       const originalText = btn.textContent;
       btn.disabled = true;

@@ -204,7 +204,7 @@
       var data = await res.json();
 
       if (!res.ok || !data.ok) {
-        alert((data && data.error) || "Failed to load vendor data");
+        appAlert((data && data.error) || "Failed to load vendor data", 'error');
         return;
       }
 
@@ -225,7 +225,7 @@
       if (els.notesInput) els.notesInput.value = vendor.notes || "";
       if (els.isActiveInput) els.isActiveInput.checked = vendor.is_active !== false;
     } catch (err) {
-      alert("Network error while loading vendor data");
+      appAlert("Network error while loading vendor data", 'error');
     }
   }
 
@@ -328,7 +328,7 @@
           var data = await res.json();
 
           if (!res.ok || !data.ok) {
-            alert((data && data.error) || "Failed to update vendor");
+            appAlert((data && data.error) || "Failed to update vendor", 'error');
             if (current.submitBtn) {
               current.submitBtn.disabled = false;
               current.submitBtn.textContent = "Update Vendor";
@@ -338,7 +338,7 @@
 
           window.location.reload();
         } catch (err) {
-          alert("Network error while updating vendor");
+          appAlert("Network error while updating vendor", 'error');
           if (current.submitBtn) {
             current.submitBtn.disabled = false;
             current.submitBtn.textContent = "Update Vendor";

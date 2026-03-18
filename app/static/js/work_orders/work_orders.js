@@ -106,7 +106,7 @@
       const modal = new bootstrap.Modal(document.getElementById("paymentModalList"));
       modal.show();
     } catch (err) {
-      alert(err.message || "Failed to load payment info.");
+      appAlert(err.message || "Failed to load payment info.", 'error');
     }
     });
   }
@@ -124,12 +124,12 @@
     const paymentDate = String(document.getElementById("paymentListDateInput")?.value || "").trim();
 
     if (amount <= 0) {
-      alert("Please enter a valid payment amount.");
+      appAlert("Please enter a valid payment amount.", 'warning');
       return;
     }
 
     if (!paymentDate) {
-      alert("Please select payment date.");
+      appAlert("Please select payment date.", 'warning');
       return;
     }
 
@@ -161,7 +161,7 @@
         }
       }
 
-      alert("Payment recorded successfully!");
+      appAlert("Payment recorded successfully!", 'success');
       currentWorkOrderId = null;
       
       // Refresh payments tab if it's loaded
@@ -169,7 +169,7 @@
         loadPaymentsData();
       }
     } catch (err) {
-      alert(err.message || "Failed to record payment.");
+      appAlert(err.message || "Failed to record payment.", 'error');
     } finally {
       btn.disabled = false;
       btn.textContent = originalText;
@@ -309,7 +309,7 @@
       const paymentId = String(btn.dataset.paymentId || "").trim();
       if (!paymentId) return;
 
-      if (!window.confirm("Delete this payment?")) return;
+      if (!await appConfirm("Delete this payment?")) return;
 
       const originalText = btn.textContent;
       btn.disabled = true;
@@ -317,10 +317,10 @@
 
       try {
         await postJson(`/work_orders/api/payments/${encodeURIComponent(paymentId)}/delete`, {});
-        alert("Payment deleted successfully!");
+        appAlert("Payment deleted successfully!", 'success');
         window.location.reload();
       } catch (err) {
-        alert(err.message || "Failed to delete payment.");
+        appAlert(err.message || "Failed to delete payment.", 'error');
         btn.disabled = false;
         btn.textContent = originalText;
       }

@@ -57,7 +57,7 @@
       return;
     }
 
-    if (!window.confirm("Delete this payment?")) {
+    if (!await appConfirm("Delete this payment?")) {
       return;
     }
 
@@ -77,7 +77,7 @@
 
       window.location.reload();
     } catch (err) {
-      window.alert(err.message || "Failed to delete payment.");
+      appAlert(err.message || "Failed to delete payment.", 'error');
       btn.disabled = false;
       btn.textContent = originalText;
     }

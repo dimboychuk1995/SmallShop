@@ -159,7 +159,7 @@
         var shopName = btn.getAttribute("data-shop-name") || "this shop";
         if (!shopId) return;
 
-        var confirmed = window.confirm("Set '" + shopName + "' as inactive?");
+        var confirmed = await appConfirm("Set '" + shopName + "' as inactive?");
         if (!confirmed) return;
 
         btn.disabled = true;
@@ -171,12 +171,12 @@
           var data = await res.json().catch(function () { return {}; });
           if (!res.ok || !data.ok) {
             var msg = (data && data.errors && data.errors[0]) || (data && data.error) || "Failed to deactivate shop.";
-            alert(msg);
+            appAlert(msg, 'error');
             return;
           }
           window.location.reload();
         } catch (err) {
-          alert("Network error while deactivating shop.");
+          appAlert("Network error while deactivating shop.", 'error');
         } finally {
           btn.disabled = false;
         }
