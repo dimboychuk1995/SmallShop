@@ -1,3 +1,15 @@
+"""
+Sync ZIP code sales tax rates into master_db.zip_sales_tax_rates collection.
+
+Usage as module:
+  from app.utils.sync_zip_sales_tax_rates import collect_shop_zips, fetch_from_api_ninjas
+
+Usage as CLI script:
+  python -m app.utils.sync_zip_sales_tax_rates --source api_ninjas --dry-run
+  python -m app.utils.sync_zip_sales_tax_rates --source csv --csv rates.csv
+  python -m app.utils.sync_zip_sales_tax_rates --zip 60118 --zip 10001
+"""
+
 import argparse
 import csv
 import json
@@ -5,17 +17,12 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 from app.config import Config
 

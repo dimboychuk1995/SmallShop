@@ -85,13 +85,13 @@ def _work_order_tax_total(wo: dict) -> float:
     )
 
 
-def _get_shop_sales_tax_context(shop: dict) -> dict:
+def _get_shop_sales_tax_context(shop: dict, shop_db=None) -> dict:
+    from app.utils.sales_tax import resolve_active_shop_sales_tax_rate
     master = get_master_db()
     zip_code = get_shop_zip_code(shop)
-    if not zip_code:
-        return {"zip_code": "", "rate": 0.0}
-
-    rate_doc = get_zip_sales_tax_rate(master, zip_code) or {}
+    shop_id = shop.get("_id")
+    
+    rate_doc = resolve_active_shop_sales_tax_rate(master, shop_id, shop_db) or {}
     try:
         rate = float(rate_doc.get("combined_rate") or 0)
     except Exception:
@@ -1516,7 +1516,7 @@ def render_details(shop_db, shop, customer_id, unit_id, form_state=None):
             unit_id = None
 
     ctx = {
-        "sales_tax_context": _get_shop_sales_tax_context(shop),
+        "sales_tax_context": _get_shop_sales_tax_context(shop, shop_db),
         "active_page": "work_orders",
         "customers": customers,
         "units": units,
@@ -2267,7 +2267,7 @@ def create_work_order():
             totals = {}
 
     totals = align_totals_with_labors(normalize_totals_payload(totals), labors)
-    shop_tax = _get_shop_sales_tax_context(shop)
+    shop_tax = _get_shop_sales_tax_context(shop, shop_db)
     totals = _apply_sales_tax_to_totals(
         totals,
         shop_tax.get("rate") or 0,
@@ -2600,7 +2600,7 @@ def api_work_order_update(work_order_id):
     mechanics_by_id = {m["id"]: m for m in get_assignable_mechanics(shop)}
     labors = apply_assignments_to_labors(labors, mechanics_by_id)
     totals = align_totals_with_labors(totals, labors)
-    shop_tax = _get_shop_sales_tax_context(shop)
+    shop_tax = _get_shop_sales_tax_context(shop, shop_db)
     totals = _apply_sales_tax_to_totals(
         totals,
         shop_tax.get("rate") or 0,

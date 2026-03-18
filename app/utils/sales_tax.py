@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 
 from bson import ObjectId
+from pymongo.database import Database
 
 
 US_ZIP_REGEX = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
@@ -50,7 +51,29 @@ def get_zip_sales_tax_rate(master_db, zip_code: str) -> dict | None:
     )
 
 
-def resolve_active_shop_sales_tax_rate(master_db, shop_id: str | ObjectId | None) -> dict | None:
+def get_custom_shop_sales_tax_settings(shop_db: Database) -> dict | None:
+    """Get custom sales tax settings stored in the shop DB. Returns {'combined_rate': float} or None."""
+    if shop_db is None:
+        return None
+    
+    try:
+        return shop_db.shop_settings.find_one(
+            {
+                "key": "sales_tax_rate",
+                "is_active": {"$ne": False},
+            }
+        )
+    except Exception:
+        return None
+
+
+def resolve_active_shop_sales_tax_rate(master_db, shop_id: str | ObjectId | None, shop_db: Database = None) -> dict | None:
+    """
+    Resolve sales tax rate for a shop.
+    Priority:
+    1. Custom shop settings (shop_db.shop_settings)
+    2. ZIP code from shop address (master_db.zip_sales_tax_rates)
+    """
     if not shop_id:
         return None
 
@@ -63,6 +86,13 @@ def resolve_active_shop_sales_tax_rate(master_db, shop_id: str | ObjectId | None
         except Exception:
             return None
 
+    # Check custom shop settings first
+    if shop_db is not None:
+        custom = get_custom_shop_sales_tax_settings(shop_db)
+        if custom is not None and custom.get("combined_rate") is not None:
+            return custom
+    
+    # Fallback to ZIP code lookup
     shop = master_db.shops.find_one({"_id": shop_oid})
     zip_code = get_shop_zip_code(shop)
     if not zip_code:
