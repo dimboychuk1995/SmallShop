@@ -34,6 +34,16 @@
       <div class="small text-muted">Default Labor Rate</div>
       <div class="fw-semibold">{{ customer.default_labor_rate_name if customer.default_labor_rate_name else '-' }}</div>
     </div>
+    <div>
+      <div class="small text-muted">Taxable</div>
+      <div>
+        {% if customer.taxable %}
+          <span class="badge bg-primary">Yes</span>
+        {% else %}
+          <span class="badge bg-light text-dark border">No</span>
+        {% endif %}
+      </div>
+    </div>
   </div>
 </div>
 
@@ -466,6 +476,14 @@
                   </option>
                 {% endfor %}
               </select>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label d-block" for="customerTaxable">Taxable</label>
+              <div class="form-check form-switch mt-1">
+                <input class="form-check-input" type="checkbox" role="switch" id="customerTaxable" name="taxable" value="1" {% if customer.taxable %}checked{% endif %}>
+                <label class="form-check-label" for="customerTaxable">Yes</label>
+              </div>
             </div>
 
             <div class="col-12">

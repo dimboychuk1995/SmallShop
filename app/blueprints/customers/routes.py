@@ -522,6 +522,7 @@ def customer_details_page(customer_id):
         "phone": customer.get("phone") or "",
         "email": customer.get("email") or "",
         "address": customer.get("address") or "",
+        "taxable": bool(customer.get("taxable", False)),
         "default_labor_rate": str(customer.get("default_labor_rate")) if isinstance(customer.get("default_labor_rate"), ObjectId) else "",
         "default_labor_rate_id": selected_rate_id,
         "is_active": customer.get("is_active", True),
@@ -954,6 +955,7 @@ def customers_create():
     phone = (request.form.get("phone") or "").strip()
     email = (request.form.get("email") or "").strip().lower()
     address = (request.form.get("address") or "").strip()
+    taxable = (request.form.get("taxable") or "").strip().lower() in {"1", "true", "on", "yes"}
 
     # Минимальная валидация: пусть будет обязательна компания ИЛИ имя+фамилия
     if not company_name and not (first_name and last_name):
@@ -981,6 +983,7 @@ def customers_create():
         "phone": phone or None,
         "email": email or None,
         "address": address or None,
+        "taxable": taxable,
         "default_labor_rate": default_rate_doc.get("_id") if default_rate_doc else None,
 
         "is_active": True,
@@ -1069,6 +1072,7 @@ def customer_details_update(customer_id):
     phone = (request.form.get("phone") or "").strip()
     email = (request.form.get("email") or "").strip().lower()
     address = (request.form.get("address") or "").strip()
+    taxable = (request.form.get("taxable") or "").strip().lower() in {"1", "true", "on", "yes"}
     default_labor_rate_id = _oid(request.form.get("default_labor_rate"))
     if request.form.get("default_labor_rate") and not default_labor_rate_id:
         flash("Selected default labor rate is invalid.", "error")
@@ -1099,6 +1103,7 @@ def customer_details_update(customer_id):
                 "phone": phone or None,
                 "email": email or None,
                 "address": address or None,
+                "taxable": taxable,
                 "default_labor_rate": default_labor_rate_id,
                 "updated_at": now,
                 "updated_by": user_oid,
@@ -1137,6 +1142,7 @@ def customers_api_get(customer_id):
                 "phone": customer.get("phone") or "",
                 "email": customer.get("email") or "",
                 "address": customer.get("address") or "",
+                "taxable": bool(customer.get("taxable", False)),
                 "is_active": customer.get("is_active", True),
             },
         }
@@ -1166,6 +1172,8 @@ def customers_api_update(customer_id):
     phone = (data.get("phone") or "").strip()
     email = (data.get("email") or "").strip().lower()
     address = (data.get("address") or "").strip()
+    taxable_raw = data.get("taxable", False)
+    taxable = bool(taxable_raw) if isinstance(taxable_raw, bool) else str(taxable_raw).strip().lower() in {"1", "true", "on", "yes"}
 
     if not company_name and not (first_name and last_name):
         return jsonify({"ok": False, "error": "Company name or First+Last name is required."}), 400
@@ -1183,6 +1191,7 @@ def customers_api_update(customer_id):
                 "phone": phone or None,
                 "email": email or None,
                 "address": address or None,
+                "taxable": taxable,
                 "updated_at": now,
                 "updated_by": user_oid,
             }
