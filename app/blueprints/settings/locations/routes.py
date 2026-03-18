@@ -859,6 +859,8 @@ def api_locations_create():
 
     if len(name) < 2:
         return jsonify({"ok": False, "errors": ["Shop name is required."]}), 400
+    if len(address) < 5:
+        return jsonify({"ok": False, "errors": ["Address is required."]}), 400
 
     tenant_slug = tenant.get("slug") or slugify_shop_name(tenant.get("name") or "tenant")
     shop_slug = slugify_shop_name(name)

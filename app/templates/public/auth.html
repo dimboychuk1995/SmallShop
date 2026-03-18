@@ -78,14 +78,15 @@
 
               <div class="mb-3">
                 <label for="company_address" class="form-label">Company address</label>
-                <textarea
+                <input
                   id="company_address"
                   name="company_address"
-                  rows="3"
+                  type="text"
                   class="form-control"
-                  placeholder="Street, City, State, ZIP"
+                  placeholder="Start typing an address…"
+                  autocomplete="off"
                   required
-                ></textarea>
+                />
               </div>
 
               <div class="mb-3">
@@ -163,4 +164,23 @@
 
   </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  "use strict";
+  function initRegisterAutocomplete() {
+    var input = document.getElementById("company_address");
+    if (input && typeof initAddressAutocomplete === "function") {
+      initAddressAutocomplete(input);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initRegisterAutocomplete, { once: true });
+  } else {
+    initRegisterAutocomplete();
+  }
+})();
+</script>
 {% endblock %}

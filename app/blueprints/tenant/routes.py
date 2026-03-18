@@ -10,6 +10,7 @@ from werkzeug.security import generate_password_hash
 from pymongo.errors import DuplicateKeyError
 
 from app.extensions import get_master_db, get_mongo_client
+from app.utils.address_lookup import search_addresses
 from . import tenant_bp
 
 
@@ -629,3 +630,16 @@ def register_tenant():
             client.drop_database(tenant_db_name)
 
         return jsonify({"ok": False, "errors": [str(e)]}), 500
+
+
+# -----------------------------
+# Public address autocomplete (no auth required — used by registration form)
+# -----------------------------
+
+@tenant_bp.get("/api/address-autocomplete")
+def address_autocomplete():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 3:
+        return jsonify({"ok": True, "suggestions": []})
+    suggestions = search_addresses(q)
+    return jsonify({"ok": True, "suggestions": suggestions})

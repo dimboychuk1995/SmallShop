@@ -62,6 +62,12 @@
         if (nameInput) nameInput.focus();
         return;
       }
+      var addressInput = form.querySelector('input[name="address"]');
+      if (!payload.address || payload.address.length < 5) {
+        setError("Address is required.");
+        if (addressInput) addressInput.focus();
+        return;
+      }
 
       submitBtn.disabled = true;
       try {
@@ -244,6 +250,23 @@
         });
       }
     }
+
+    function initLocationsAddressAutocomplete() {
+      if (typeof window.initAddressAutocomplete !== "function") {
+        return;
+      }
+      var createAddressInput = form ? form.querySelector('input[name="address"]') : null;
+      var editAddressInput = editForm ? editForm.querySelector('input[name="address"]') : null;
+      if (createAddressInput) window.initAddressAutocomplete(createAddressInput);
+      if (editAddressInput) window.initAddressAutocomplete(editAddressInput);
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initLocationsAddressAutocomplete, { once: true });
+    } else {
+      initLocationsAddressAutocomplete();
+    }
+    window.addEventListener("smallshop:public-ready", initLocationsAddressAutocomplete);
   }
 
   if (document.readyState === "loading") {

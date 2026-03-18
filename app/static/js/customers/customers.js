@@ -46,6 +46,23 @@
   bindRowNavigation(".js-customer-row");
   bindRowNavigation(".js-unit-row");
 
+  function initCustomerAddressAutocomplete() {
+    if (typeof window.initAddressAutocomplete !== "function") {
+      return;
+    }
+    var customerAddressInput = document.getElementById("customerAddress");
+    if (customerAddressInput) {
+      window.initAddressAutocomplete(customerAddressInput);
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initCustomerAddressAutocomplete, { once: true });
+  } else {
+    initCustomerAddressAutocomplete();
+  }
+  window.addEventListener("smallshop:public-ready", initCustomerAddressAutocomplete);
+
   document.addEventListener("click", async function (event) {
     var btn = event.target.closest(".js-delete-work-order-payment");
     if (!btn) {
