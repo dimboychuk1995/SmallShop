@@ -1,18 +1,26 @@
 {% extends "layouts/app_base.html" %}
-
 {% block page_title %}Reports{% endblock %}
 
 {% block app_content %}
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h1 class="h4 mb-1">Reports</h1>
-    <p class="text-muted mb-0">View and analyze shop performance metrics.</p>
+    <p class="text-muted mb-0">Choose a section. Each section is a separate page.</p>
   </div>
 </div>
 
-<div class="card">
-  <div class="card-body">
-    <div class="text-muted">Empty page.</div>
+<div class="row g-3">
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <a href="{{ url_for('reports.activity_journal_page') }}" class="text-decoration-none">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Activity Journal</h2>
+          <p class="text-muted mb-0">Track create, edit, and delete actions across the system.</p>
+        </div>
+      </div>
+    </a>
   </div>
+
 </div>
 {% endblock %}

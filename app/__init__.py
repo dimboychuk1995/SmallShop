@@ -4,6 +4,7 @@ from bson import ObjectId
 from app.config import Config
 from app.extensions import init_mongo, get_master_db
 from app.utils.auth import SESSION_USER_ID, SESSION_TENANT_ID
+from app.blueprints.reports.audit.journal import build_request_id, write_audit_journal
 
 def create_app():
     app = Flask(__name__)
@@ -14,6 +15,8 @@ def create_app():
     # каждый запрос: если есть сессия — поднимем g.user и g.tenant
     @app.before_request
     def load_current_context():
+        g.request_id = build_request_id()
+        g._audit_journal_written = False
         g.user = None
         g.tenant = None
 
@@ -50,8 +53,19 @@ def create_app():
         g.user = user
         g.tenant = tenant
 
+    @app.after_request
+    def journal_after_request(response):
+        write_audit_journal(response=response)
+        return response
+
+    @app.teardown_request
+    def journal_teardown_request(exc):
+        if exc is not None:
+            write_audit_journal(error=exc)
+
     # Blueprints
     from app.blueprints.main import main_bp
+    from app.blueprints.reports import reports_bp
     from app.blueprints.dashboard import dashboard_bp
     from app.blueprints.auth import auth_bp
     from app.blueprints.tenant import tenant_bp
@@ -62,6 +76,7 @@ def create_app():
     from app.blueprints.work_orders import work_orders_bp
 
     app.register_blueprint(main_bp)
+    app.register_blueprint(reports_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(tenant_bp)

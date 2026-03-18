@@ -22,7 +22,7 @@ NAV_ITEMS = [
     {"key": "customers", "label": "Customers", "endpoint": "customers.customers_page"},
     {"key": "work_orders", "label": "Work Orders", "endpoint": "work_orders.work_orders_page"},
     {"key": "settings", "label": "Settings", "endpoint": "main.settings"},
-    {"key": "reports", "label": "Reports", "endpoint": "main.reports"},
+    {"key": "reports", "label": "Reports", "endpoint": "reports.reports_index"},
 ]
 
 
@@ -243,7 +243,3 @@ def settings_notifications():
     return _render_app_page("public/settings/notifications.html", active_page="settings")
 
 
-@main_bp.get("/reports")
-@login_required
-def reports():
-    return _render_app_page("public/reports.html", active_page="reports")
