@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page {
+      size: letter portrait;
+      margin: 0.55in 0.65in 0.55in 0.65in;
+    }
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 9pt;
+      color: #1a1a1a;
+      margin: 0;
+    }
+    .hdr-green {
+      background-color: #1f6b43;
+      color: #ffffff;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+    }
+    .hdr-shop-name { font-size: 15pt; font-weight: bold; }
+    .hdr-sub { font-size: 8pt; margin-top: 2px; }
+    .wo-title { font-size: 13pt; font-weight: bold; color: #1f6b43; text-align: right; }
+    .wo-date  { font-size: 9pt; color: #555555; text-align: right; margin-top: 2px; }
+
+    .sec-title {
+      font-size: 7.5pt;
+      font-weight: bold;
+      color: #1f6b43;
+      text-transform: uppercase;
+      border-bottom: 1pt solid #1f6b43;
+      padding-bottom: 2px;
+      margin-bottom: 5px;
+      margin-top: 10px;
+    }
+    .info-lbl {
+      font-size: 8pt;
+      font-weight: bold;
+      color: #555555;
+      padding-right: 8px;
+      white-space: nowrap;
+      vertical-align: top;
+    }
+    .info-val {
+      font-size: 8.5pt;
+      vertical-align: top;
+    }
+
+    .labor-block {
+      border: 1pt solid #dddddd;
+      padding: 7px 9px;
+      margin-bottom: 8px;
+      margin-top: 4px;
+    }
+    .labor-title {
+      font-size: 10pt;
+      font-weight: bold;
+      color: #1f6b43;
+      margin-bottom: 3px;
+    }
+    .labor-meta {
+      font-size: 7.5pt;
+      color: #666666;
+      margin-bottom: 5px;
+    }
+    .parts-tbl {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      font-size: 8pt;
+    }
+    .parts-tbl th {
+      background-color: #f2f2f2;
+      border: 1pt solid #cccccc;
+      padding: 3px 6px;
+      text-align: left;
+    }
+    .parts-tbl td {
+      border: 1pt solid #dddddd;
+      padding: 3px 6px;
+      vertical-align: top;
+    }
+    .tr { text-align: right; }
+
+    .sub-tbl {
+      font-size: 8pt;
+      margin-left: auto;
+      margin-top: 6px;
+    }
+    .sub-tbl td { padding: 1px 5px; }
+    .sub-lbl { text-align: right; color: #555555; min-width: 100px; }
+    .sub-val { text-align: right; font-weight: bold; min-width: 65px; }
+
+    .totals-box {
+      border-top: 2pt solid #1f6b43;
+      padding-top: 8px;
+      margin-top: 14px;
+    }
+    .tot-tbl {
+      font-size: 9pt;
+      margin-left: auto;
+    }
+    .tot-tbl td { padding: 2px 5px; }
+    .tot-lbl { text-align: right; color: #555555; min-width: 130px; }
+    .tot-val { text-align: right; font-weight: bold; min-width: 85px; }
+    .grand-row td {
+      font-size: 11pt;
+      font-weight: bold;
+      border-top: 1pt solid #cccccc;
+      padding-top: 5px;
+    }
+    .italic-note { font-style: italic; font-size: 7.5pt; color: #777777; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td width="60%">
+        <div class="hdr-green">
+          <div class="hdr-shop-name">{{ shop_name }}</div>
+          {% if shop_address %}<div class="hdr-sub">{{ shop_address }}</div>{% endif %}
+          {% if shop_contact %}<div class="hdr-sub">{{ shop_contact }}</div>{% endif %}
+        </div>
+      </td>
+      <td width="40%" style="vertical-align: top; padding-top: 6px; padding-left: 14px;">
+        <div class="wo-title">Work Order #{{ wo_number }}</div>
+        {% if wo_date_label %}<div class="wo-date">Date: {{ wo_date_label }}</div>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <!-- CUSTOMER / UNIT -->
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td width="50%" style="vertical-align: top; padding-right: 14px;">
+        <div class="sec-title">Customer</div>
+        <table cellpadding="0" cellspacing="0">
+          <tr>
+            <td class="info-lbl">Name:</td>
+            <td class="info-val">{{ cust_name }}</td>
+          </tr>
+          {% if customer_email %}
+          <tr>
+            <td class="info-lbl">Email:</td>
+            <td class="info-val">{{ customer_email }}</td>
+          </tr>
+          {% endif %}
+          {% if customer_phone %}
+          <tr>
+            <td class="info-lbl">Phone:</td>
+            <td class="info-val">{{ customer_phone }}</td>
+          </tr>
+          {% endif %}
+        </table>
+      </td>
+      <td width="50%" style="vertical-align: top; padding-left: 14px;">
+        <div class="sec-title">Vehicle / Unit</div>
+        <table cellpadding="0" cellspacing="0">
+          {% if unit_number %}
+          <tr>
+            <td class="info-lbl">Unit #:</td>
+            <td class="info-val">{{ unit_number }}</td>
+          </tr>
+          {% endif %}
+          {% if unit_year or unit_make or unit_model %}
+          <tr>
+            <td class="info-lbl">Vehicle:</td>
+            <td class="info-val">
+              {{ unit_year or '' }}{% if unit_year and (unit_make or unit_model) %} {% endif %}{{ unit_make or '' }}{% if unit_make and unit_model %} {% endif %}{{ unit_model or '' }}
+            </td>
+          </tr>
+          {% endif %}
+          {% if unit_vin %}
+          <tr>
+            <td class="info-lbl">VIN:</td>
+            <td class="info-val">{{ unit_vin }}</td>
+          </tr>
+          {% endif %}
+          {% if unit_mileage %}
+          <tr>
+            <td class="info-lbl">Mileage:</td>
+            <td class="info-val">{{ unit_mileage }}</td>
+          </tr>
+          {% endif %}
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <!-- SERVICES & PARTS -->
+  <div class="sec-title">Services &amp; Parts</div>
+
+  {% for labor in labors %}
+  <div class="labor-block">
+    <div class="labor-title">{{ loop.index }}. {{ labor.labor_desc }}</div>
+    {% if labor.hours or labor.rate_code %}
+    <div class="labor-meta">
+      {% if labor.hours %}Hours: {{ labor.hours }}{% endif %}
+      {% if labor.hours and labor.rate_code %} &nbsp;·&nbsp; {% endif %}
+      {% if labor.rate_code %}Rate: {{ labor.rate_code }}{% endif %}
+    </div>
+    {% endif %}
+
+    {% if labor.parts %}
+    <table class="parts-tbl">
+      <thead>
+        <tr>
+          <th>Part # / Description</th>
+          <th class="tr" style="width: 35px;">Qty</th>
+          <th class="tr" style="width: 75px;">Unit Price</th>
+          <th class="tr" style="width: 75px;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in labor.parts %}
+        <tr>
+          <td>
+            {% if p.part_number %}<strong>{{ p.part_number }}</strong>{% endif %}
+            {% if p.description and p.description != p.part_number %}
+              {% if p.part_number %}<br>{% endif %}
+              <span style="color: #555555;">{{ p.description }}</span>
+            {% endif %}
+          </td>
+          <td class="tr">{{ p.qty }}</td>
+          <td class="tr">${{ "%.2f" | format(p.price) }}</td>
+          <td class="tr">${{ "%.2f" | format(p.total) }}</td>
+        </tr>
+        {% if p.core > 0 %}
+        <tr>
+          <td colspan="3" class="italic-note">Core Charge &times; {{ p.qty }}</td>
+          <td class="tr">${{ "%.2f" | format(p.core) }}</td>
+        </tr>
+        {% endif %}
+        {% if p.misc > 0 %}
+        <tr>
+          <td colspan="3" class="italic-note">{{ p.misc_desc or 'Misc Charge' }}</td>
+          <td class="tr">${{ "%.2f" | format(p.misc) }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Block subtotals (right-aligned) -->
+    <table class="sub-tbl" cellpadding="0" cellspacing="0">
+      {% if labor.parts_subtotal > 0 %}
+      <tr>
+        <td class="sub-lbl">Parts:</td>
+        <td class="sub-val">${{ "%.2f" | format(labor.parts_subtotal) }}</td>
+      </tr>
+      {% endif %}
+      {% if labor.core_total > 0 %}
+      <tr>
+        <td class="sub-lbl">Core Charges:</td>
+        <td class="sub-val">${{ "%.2f" | format(labor.core_total) }}</td>
+      </tr>
+      {% endif %}
+      {% if labor.misc_total > 0 %}
+      <tr>
+        <td class="sub-lbl">Misc:</td>
+        <td class="sub-val">${{ "%.2f" | format(labor.misc_total) }}</td>
+      </tr>
+      {% endif %}
+      <tr>
+        <td class="sub-lbl">Labor:</td>
+        <td class="sub-val">${{ "%.2f" | format(labor.labor_base) }}</td>
+      </tr>
+      {% if labor.shop_supply > 0 %}
+      <tr>
+        <td class="sub-lbl">Shop Supply:</td>
+        <td class="sub-val">${{ "%.2f" | format(labor.shop_supply) }}</td>
+      </tr>
+      {% endif %}
+      <tr style="border-top: 1pt solid #cccccc;">
+        <td class="sub-lbl"><strong>Block Total:</strong></td>
+        <td class="sub-val"><strong>${{ "%.2f" | format(labor.block_total) }}</strong></td>
+      </tr>
+    </table>
+  </div>
+  {% endfor %}
+
+  <!-- GRAND TOTALS -->
+  <div class="totals-box">
+    <table class="tot-tbl" cellpadding="0" cellspacing="0">
+      <tr>
+        <td class="tot-lbl">Labor Total:</td>
+        <td class="tot-val">${{ "%.2f" | format(t.labor_total) }}</td>
+      </tr>
+      <tr>
+        <td class="tot-lbl">Parts Total:</td>
+        <td class="tot-val">${{ "%.2f" | format(t.parts_total) }}</td>
+      </tr>
+      {% if t.core_total > 0 %}
+      <tr>
+        <td class="tot-lbl">Core Charges:</td>
+        <td class="tot-val">${{ "%.2f" | format(t.core_total) }}</td>
+      </tr>
+      {% endif %}
+      {% if t.shop_supply_total > 0 %}
+      <tr>
+        <td class="tot-lbl">Shop Supply:</td>
+        <td class="tot-val">${{ "%.2f" | format(t.shop_supply_total) }}</td>
+      </tr>
+      {% endif %}
+      {% if t.misc_total > 0 %}
+      <tr>
+        <td class="tot-lbl">Misc:</td>
+        <td class="tot-val">${{ "%.2f" | format(t.misc_total) }}</td>
+      </tr>
+      {% endif %}
+      <tr class="grand-row">
+        <td class="tot-lbl">GRAND TOTAL:</td>
+        <td class="tot-val">${{ "%.2f" | format(t.grand_total) }}</td>
+      </tr>
+    </table>
+  </div>
+
+</body>
+</html>

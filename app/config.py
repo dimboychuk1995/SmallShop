@@ -10,3 +10,13 @@ class Config:
 
     # Master DB where we store tenants/users/shops
     MASTER_DB_NAME = os.environ.get("MASTER_DB_NAME") or os.environ.get("MONGO_DB") or "master_db"
+
+    # ── Email (SMTP) ──────────────────────────────────────────────────────────
+    # Set these in .env to enable "Email Work Order" and "Email Receipt" features.
+    #   SMTP_HOST        smtp server host      (default: smtp.gmail.com)
+    #   SMTP_PORT        SMTP port             (default: 587)
+    #   SMTP_USER        login / sender address
+    #   SMTP_PASS        password / app-password
+    #   SMTP_FROM_EMAIL  explicit From address  (defaults to SMTP_USER)
+    #   SMTP_FROM_NAME   display name           (default: SmallShop)
+

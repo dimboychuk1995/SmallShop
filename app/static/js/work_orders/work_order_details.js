@@ -1769,7 +1769,7 @@
 
   function setButtonsState(mode, els) {
     // mode: "creating" | "created_locked_open" | "editing_open" | "paid"
-    const { createBtn, editBtn, saveBtn, paidBtn, unpaidBtn } = els;
+    const { createBtn, editBtn, saveBtn, paidBtn, unpaidBtn, emailBtn } = els;
 
     const show = (el, v) => { if (el) el.style.display = v ? "" : "none"; };
     const enable = (el, v) => { if (el) el.disabled = !v; };
@@ -1781,6 +1781,7 @@
       show(saveBtn, false);
       show(paidBtn, false);
       show(unpaidBtn, false);
+      show(emailBtn, false);
       return;
     }
 
@@ -1790,6 +1791,7 @@
       show(saveBtn, false);
       show(paidBtn, true); enable(paidBtn, true);
       show(unpaidBtn, false);
+      show(emailBtn, true); enable(emailBtn, true);
       return;
     }
 
@@ -1799,6 +1801,7 @@
       show(saveBtn, true); enable(saveBtn, true);
       show(paidBtn, true); enable(paidBtn, false); // пока редактируем — paid запрещаем
       show(unpaidBtn, false);
+      show(emailBtn, true); enable(emailBtn, true);
       return;
     }
 
@@ -1808,6 +1811,7 @@
       show(saveBtn, false);
       show(paidBtn, false);
       show(unpaidBtn, true); enable(unpaidBtn, true);
+      show(emailBtn, true); enable(emailBtn, true);
       return;
     }
   }
@@ -1988,6 +1992,7 @@
     const saveBtn = $("saveWorkOrderBtn");
     const paidBtn = $("paidWorkOrderBtn");
     const unpaidBtn = $("unpaidWorkOrderBtn");
+    const emailBtn = $("emailWorkOrderBtn");
 
     const addLaborBtn = $("addLaborBtn");
     const addUnitBtn = $("addUnitBtn");
@@ -2014,7 +2019,7 @@
 
     const els = {
       editor, customerSel, unitSel, addUnitBtn, addLaborBtn,
-      createBtn, editBtn, saveBtn, paidBtn, unpaidBtn
+      createBtn, editBtn, saveBtn, paidBtn, unpaidBtn, emailBtn
     };
 
     let targetAssignBlock = null;
@@ -2032,6 +2037,7 @@
           throw new Error((data && (data.error || data.message)) || "Failed to load timeline");
         }
 
+        customerEmail = String(data.customer_email || "").trim();
         workOrderDatesBlock.style.display = "";
         if (woMetaCreated) {
           woMetaCreated.textContent = data.created_at_label || formatDateLabel(data.created_at);
@@ -2055,7 +2061,10 @@
               <td class="text-end fw-semibold">$${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}</td>
               <td>${escapeText(method)}</td>
               <td>${notes ? escapeText(notes) : "-"}</td>
-              <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger js-delete-wo-payment-inline" data-payment-id="${escapeText(pid)}">Delete</button></td>
+              <td class="text-end">
+                <button type="button" class="btn btn-sm btn-outline-secondary js-email-wo-payment-inline me-1" data-payment-id="${escapeText(pid)}">&#9993; Receipt</button>
+                <button type="button" class="btn btn-sm btn-outline-danger js-delete-wo-payment-inline" data-payment-id="${escapeText(pid)}">Delete</button>
+              </td>
             </tr>
           `;
         }).join("");
@@ -2695,6 +2704,7 @@
     let workOrderId = "";
     let workOrderStatus = "open"; // "open" | "paid"
     let isCreated = false;
+    let customerEmail = "";
 
     const createdInfo = readJsonScript("workOrderCreatedData", { created: false, id: "", status: "open" });
     if (createdInfo && createdInfo.created && createdInfo.id) {
@@ -2847,6 +2857,86 @@
         await loadWorkOrderTimeline();
       } catch (err) {
         toast(err.message || "Failed to delete payment.");
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+
+    async function askEmailAddress(defaultEmail, title) {
+      const result = await Swal.fire({
+        title: title || "Send Email",
+        input: "email",
+        inputValue: defaultEmail || "",
+        inputPlaceholder: "customer@example.com",
+        showCancelButton: true,
+        confirmButtonText: "Send",
+        confirmButtonColor: "#1f6b43",
+        cancelButtonColor: "#6c757d",
+        showClass: { popup: "", backdrop: "" },
+        hideClass: { popup: "", backdrop: "" },
+      });
+      if (!result.isConfirmed) return null;
+      return String(result.value || "").trim();
+    }
+
+    if (emailBtn) {
+      emailBtn.addEventListener("click", async function () {
+        if (!isCreated || !workOrderId) return;
+        const addr = await askEmailAddress(customerEmail, "Send Work Order");
+        if (!addr) return;
+
+        emailBtn.disabled = true;
+        const originalText = emailBtn.textContent;
+        emailBtn.textContent = "Sending…";
+
+        try {
+          const res = await fetch(`/work_orders/api/work_orders/${encodeURIComponent(workOrderId)}/send-email`, {
+            method: "POST",
+            headers: { "Accept": "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify({ email: addr }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data || !data.ok) {
+            throw new Error((data && (data.error || data.message)) || "Failed to send email");
+          }
+          toast(`Work order sent to ${data.sent_to}`, "success");
+        } catch (err) {
+          toast(err.message || "Failed to send email.", "error");
+        } finally {
+          emailBtn.disabled = false;
+          emailBtn.textContent = originalText;
+        }
+      });
+    }
+
+    document.addEventListener("click", async function (event) {
+      const btn = event.target.closest(".js-email-wo-payment-inline");
+      if (!btn) return;
+      if (!isCreated || !workOrderId) return;
+
+      const paymentId = String(btn.dataset.paymentId || "").trim();
+      if (!paymentId) return;
+
+      const addr = await askEmailAddress(customerEmail, "Send Payment Receipt");
+      if (!addr) return;
+
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+
+      try {
+        const res = await fetch(`/work_orders/api/payments/${encodeURIComponent(paymentId)}/send-receipt`, {
+          method: "POST",
+          headers: { "Accept": "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ email: addr }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data || !data.ok) {
+          throw new Error((data && (data.error || data.message)) || "Failed to send receipt");
+        }
+        toast(`Receipt sent to ${data.sent_to}`, "success");
+      } catch (err) {
+        toast(err.message || "Failed to send receipt.", "error");
         btn.disabled = false;
         btn.textContent = originalText;
       }

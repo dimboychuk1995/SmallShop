@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
-from flask import request, session, redirect, url_for, flash, jsonify
+from flask import request, session, redirect, url_for, flash, jsonify, render_template
 
 from app.blueprints.work_orders import work_orders_bp
 from app.blueprints.main.routes import _render_app_page
@@ -21,6 +21,8 @@ from app.utils.display_datetime import (
     shop_local_date_to_utc,
 )
 from app.utils.date_filters import build_date_range_filters
+from app.utils.email_sender import send_email
+from app.utils.pdf_utils import render_html_to_pdf
 
 
 def utcnow():
@@ -2665,6 +2667,9 @@ def api_get_work_order_payments(work_order_id):
         for p in payments
     ]
 
+    customer = shop_db.customers.find_one({"_id": wo.get("customer_id")}, {"email": 1}) or {}
+    customer_email = str(customer.get("email") or "").strip()
+
     return jsonify({
         "ok": True,
         "work_order_date": _fmt_dt_iso(wo.get("work_order_date") or wo.get("created_at")),
@@ -2675,6 +2680,7 @@ def api_get_work_order_payments(work_order_id):
         "paid_amount": summary["paid_amount"],
         "remaining_balance": summary["remaining_balance"],
         "status": summary["status"],
+        "customer_email": customer_email,
         "payments": payment_list
     }), 200
 
@@ -3010,3 +3016,249 @@ def api_work_order_delete(work_order_id):
         "core_changes": core_sync.get("changes") or [],
         "core_sync_errors": core_sync.get("errors") or [],
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# Email routes
+# ---------------------------------------------------------------------------
+
+@work_orders_bp.post("/work_orders/api/work_orders/<work_order_id>/send-email")
+@login_required
+@permission_required("work_orders.create")
+def api_send_work_order_email(work_order_id):
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "Shop not found"}), 404
+
+    wo_id = oid(work_order_id)
+    if not wo_id:
+        return jsonify({"ok": False, "error": "Invalid work order ID"}), 400
+
+    wo = shop_db.work_orders.find_one({"_id": wo_id, "is_active": True})
+    if not wo:
+        return jsonify({"ok": False, "error": "Work order not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    to_email = str(data.get("email") or "").strip().lower()
+    if not to_email or "@" not in to_email:
+        return jsonify({"ok": False, "error": "Valid email address required"}), 400
+
+    customer = shop_db.customers.find_one({"_id": wo.get("customer_id")}) or {}
+    cust_name = customer_label(customer)
+    customer_email_val = str(customer.get("email") or "").strip()
+    customer_phone = str(customer.get("phone") or "").strip()
+
+    unit = shop_db.units.find_one({"_id": wo.get("unit_id")}) or {}
+    unit_lbl = unit_label(unit)
+    unit_vin = str(unit.get("vin") or "").strip()
+    unit_mileage = str(unit.get("mileage") or "").strip()
+    unit_number = str(unit.get("unit_number") or "").strip()
+    unit_year = str(unit.get("year") or "").strip()
+    unit_make = str(unit.get("make") or "").strip()
+    unit_model = str(unit.get("model") or "").strip()
+
+    shop_name = str(shop.get("name") or "").strip()
+    addr_parts = [shop.get("address_line"), shop.get("city"), shop.get("state"), shop.get("zip")]
+    shop_address = ", ".join(str(p).strip() for p in addr_parts if p and str(p).strip())
+    contact_parts = [str(shop.get("phone") or "").strip(), str(shop.get("email") or "").strip()]
+    shop_contact = " · ".join(p for p in contact_parts if p)
+
+    wo_date = wo.get("work_order_date") or wo.get("created_at")
+    wo_date_label = format_date_mmddyyyy(wo_date) if wo_date else ""
+    wo_number = str(wo.get("wo_number") or work_order_id)
+
+    raw_labors = wo.get("labors") or []
+    totals_doc = wo.get("totals") if isinstance(wo.get("totals"), dict) else {}
+    totals_labors = totals_doc.get("labors") if isinstance(totals_doc.get("labors"), list) else []
+
+    # Build comprehensive labor data used by both email and PDF templates
+    labors_built = []
+    for i, block in enumerate(raw_labors):
+        if not isinstance(block, dict):
+            continue
+        labor_src = block.get("labor") if isinstance(block.get("labor"), dict) else {}
+        desc = str(labor_src.get("description") or block.get("labor_description") or "").strip()
+        hours = str(labor_src.get("hours") or block.get("labor_hours") or "").strip()
+        rate_code = str(labor_src.get("rate_code") or block.get("labor_rate_code") or "").strip()
+
+        block_totals = totals_labors[i] if i < len(totals_labors) and isinstance(totals_labors[i], dict) else {}
+        labor_base = round2(block_totals.get("labor") or 0)
+        shop_supply = round2(block_totals.get("shop_supply_total") or 0)
+        labor_total_val = round2(block_totals.get("labor_total") or block_totals.get("labor") or 0)
+        parts_subtotal = round2(block_totals.get("parts_total") or 0)
+        core_t = round2(block_totals.get("core_total") or 0)
+        misc_t = round2(block_totals.get("misc_total") or 0)
+        block_total = round2(block_totals.get("labor_full_total") or (labor_total_val + parts_subtotal))
+
+        parts_detail = []
+        for p in normalize_parts_payload(block.get("parts") or []):
+            qty = i32(p.get("qty")) or 0
+            if qty <= 0:
+                continue
+            part_number = str(p.get("part_number") or "").strip()
+            description = str(p.get("description") or "").strip()
+            price = round2(p.get("price") or 0)
+            core_per = round2(p.get("core_charge") or 0)
+            misc_per = round2(p.get("misc_charge") or 0)
+            misc_desc = str(p.get("misc_charge_description") or "").strip()
+            parts_detail.append({
+                "part_number": part_number,
+                "description": description,
+                "label": part_number or description,
+                "qty": qty,
+                "price": price,
+                "price_fmt": f"${price:.2f}",
+                "total": round2(price * qty),
+                "core": round2(core_per * qty),
+                "misc": round2(misc_per * qty),
+                "misc_desc": misc_desc,
+            })
+
+        labors_built.append({
+            "labor_desc": desc or f"Labor {i + 1}",
+            "hours": hours,
+            "labor_hours": hours,           # alias for email template
+            "rate_code": rate_code,
+            "labor_base": labor_base,
+            "shop_supply": shop_supply,
+            "labor_total": labor_total_val,
+            "labor_total_fmt": f"${labor_total_val:.2f}",
+            "parts_subtotal": parts_subtotal,
+            "core_total": core_t,
+            "misc_total": misc_t,
+            "block_total": block_total,
+            "parts": parts_detail,
+        })
+
+    t = {
+        "labor_total": round2(totals_doc.get("labor_total") or totals_doc.get("labor") or 0),
+        "parts_total": round2(totals_doc.get("parts_total") or totals_doc.get("parts") or 0),
+        "core_total": round2(totals_doc.get("core_total") or 0),
+        "shop_supply_total": round2(totals_doc.get("shop_supply_total") or 0),
+        "misc_total": round2(totals_doc.get("misc_total") or 0),
+        "grand_total": _work_order_grand_total(wo),
+    }
+
+    shared_ctx = dict(
+        shop_name=shop_name,
+        shop_address=shop_address,
+        shop_contact=shop_contact,
+        wo_number=wo_number,
+        wo_date_label=wo_date_label,
+        cust_name=cust_name,
+        customer_email=customer_email_val,
+        customer_phone=customer_phone,
+        unit_label=unit_lbl,
+        unit_vin=unit_vin,
+        unit_mileage=unit_mileage,
+        unit_number=unit_number,
+        unit_year=unit_year,
+        unit_make=unit_make,
+        unit_model=unit_model,
+        labors=labors_built,
+        t=t,
+    )
+
+    html_body = render_template("emails/work_order_email.html", **shared_ctx)
+    pdf_html = render_template("emails/work_order_pdf.html", **shared_ctx)
+
+    subject = f"Work Order #{wo_number} — {shop_name}" if shop_name else f"Work Order #{wo_number}"
+
+    try:
+        pdf_bytes = render_html_to_pdf(pdf_html)
+    except Exception:
+        pdf_bytes = None
+
+    attachments = None
+    if pdf_bytes:
+        attachments = [{
+            "filename": f"WorkOrder-{wo_number}.pdf",
+            "data": pdf_bytes,
+            "content_type": "application/pdf",
+        }]
+
+    try:
+        send_email(to_email, subject, html_body, attachments=attachments)
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    return jsonify({"ok": True, "sent_to": to_email}), 200
+
+
+@work_orders_bp.post("/work_orders/api/payments/<payment_id>/send-receipt")
+@login_required
+@permission_required("work_orders.create")
+def api_send_payment_receipt(payment_id):
+    shop_db, shop = get_shop_db()
+    if shop_db is None:
+        return jsonify({"ok": False, "error": "Shop not found"}), 404
+
+    pay_id = oid(payment_id)
+    if not pay_id:
+        return jsonify({"ok": False, "error": "Invalid payment ID"}), 400
+
+    payment = shop_db.work_order_payments.find_one({"_id": pay_id, "is_active": True})
+    if not payment:
+        return jsonify({"ok": False, "error": "Payment not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    to_email = str(data.get("email") or "").strip().lower()
+    if not to_email or "@" not in to_email:
+        return jsonify({"ok": False, "error": "Valid email address required"}), 400
+
+    wo = shop_db.work_orders.find_one({"_id": payment.get("work_order_id")}) or {}
+    customer = shop_db.customers.find_one({"_id": wo.get("customer_id")}) or {}
+    unit = shop_db.units.find_one({"_id": wo.get("unit_id")}) or {}
+
+    cust_name = customer_label(customer)
+    unit_lbl = unit_label(unit)
+
+    shop_name = str(shop.get("name") or "").strip()
+    addr_parts = [shop.get("address_line"), shop.get("city"), shop.get("state"), shop.get("zip")]
+    shop_address = ", ".join(str(p).strip() for p in addr_parts if p and str(p).strip())
+    contact_parts = [str(shop.get("phone") or "").strip(), str(shop.get("email") or "").strip()]
+    shop_contact = " · ".join(p for p in contact_parts if p)
+
+    pay_date = payment.get("payment_date") or payment.get("created_at")
+    pay_date_label = format_date_mmddyyyy(pay_date) if pay_date else ""
+
+    amount = round2(payment.get("amount") or 0)
+    method = str(payment.get("payment_method") or "cash").replace("_", " ").title()
+    notes = str(payment.get("notes") or "").strip()
+    payment_ref = str(pay_id)[-8:].upper()
+
+    paid_total = _sum_active_work_order_payments(shop_db, payment.get("work_order_id"))
+    summary = _build_work_order_payment_summary(wo, paid_total)
+
+    html_body = render_template(
+        "emails/payment_receipt_email.html",
+        shop_name=shop_name,
+        shop_address=shop_address,
+        shop_contact=shop_contact,
+        wo_number=str(wo.get("wo_number") or ""),
+        pay_date_label=pay_date_label,
+        cust_name=cust_name,
+        unit_label=unit_lbl,
+        amount=amount,
+        method=method,
+        notes=notes,
+        payment_ref=payment_ref,
+        grand_total=summary["grand_total"],
+        paid_total=summary["paid_amount"],
+        remaining=summary["remaining_balance"],
+        is_fully_paid=summary["is_fully_paid"],
+    )
+
+    wo_number = str(wo.get("wo_number") or "")
+    subject = (
+        f"Payment Receipt — WO #{wo_number} — {shop_name}"
+        if wo_number
+        else f"Payment Receipt — {shop_name}"
+    )
+
+    try:
+        send_email(to_email, subject, html_body)
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    return jsonify({"ok": True, "sent_to": to_email}), 200
