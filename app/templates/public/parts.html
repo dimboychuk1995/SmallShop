@@ -666,6 +666,18 @@
 
             <div class="col-12">
               <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sellingPriceToggle" name="has_selling_price" value="1">
+                <label class="form-check-label" for="sellingPriceToggle">This part has selling price</label>
+              </div>
+            </div>
+
+            <div class="col-md-4" id="sellingPriceGroup" style="display:none;">
+              <label class="form-label">Selling price</label>
+              <input name="selling_price" id="sellingPriceInput" type="number" min="0" step="0.01" value="0" class="form-control" />
+            </div>
+
+            <div class="col-12">
+              <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="doNotTrackInventoryToggle" name="do_not_track_inventory" value="1">
                 <label class="form-check-label" for="doNotTrackInventoryToggle">Do not track inventory for this part</label>
               </div>

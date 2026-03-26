@@ -762,6 +762,8 @@ def parts_page():
                 "in_stock": int(_parse_int(p.get("in_stock"), default=0)),
                 "average_cost": float(_parse_float(p.get("average_cost"), default=0.0)),
                 "do_not_track_inventory": bool(p.get("do_not_track_inventory")),
+                "has_selling_price": bool(p.get("has_selling_price")),
+                "selling_price": float(_parse_float(p.get("selling_price"), default=0.0)),
                 "core_has_charge": bool(p.get("core_has_charge")),
                 "core_cost": float(_parse_float(p.get("core_cost"), default=0.0)),
                 "misc_has_charge": bool(p.get("misc_has_charge")),
@@ -1103,6 +1105,8 @@ def parts_create():
 
     in_stock_raw = (request.form.get("in_stock") or "").strip()
     avg_cost_raw = (request.form.get("average_cost") or "").strip()
+    has_selling_price_raw = (request.form.get("has_selling_price") or "").strip()
+    selling_price_raw = (request.form.get("selling_price") or "").strip()
     core_has_charge_raw = (request.form.get("core_has_charge") or "").strip()
     core_cost_raw = (request.form.get("core_cost") or "").strip()
     misc_has_charge_raw = (request.form.get("misc_has_charge") or "").strip()
@@ -1117,6 +1121,12 @@ def parts_create():
     average_cost = _parse_float(avg_cost_raw, default=0.0)
     if average_cost < 0:
         flash("Average cost cannot be negative.", "error")
+        return redirect(url_for("parts.parts_page"))
+
+    has_selling_price = has_selling_price_raw == "1"
+    selling_price = _parse_float(selling_price_raw, default=0.0)
+    if has_selling_price and selling_price < 0:
+        flash("Selling price cannot be negative.", "error")
         return redirect(url_for("parts.parts_page"))
 
     core_has_charge = core_has_charge_raw == "1"
@@ -1221,6 +1231,8 @@ def parts_create():
 
         "do_not_track_inventory": bool(do_not_track_inventory),
         "average_cost": float(average_cost),
+        "has_selling_price": bool(has_selling_price),
+        "selling_price": float(selling_price) if has_selling_price else None,
         "core_has_charge": bool(core_has_charge),
         "core_cost": float(core_cost) if core_has_charge else None,
         "misc_has_charge": bool(misc_has_charge),
@@ -1295,6 +1307,8 @@ def parts_api_search():
         "reference": 1,
         "average_cost": 1,
         "vendor_id": 1,
+        "has_selling_price": 1,
+        "selling_price": 1,
         "core_has_charge": 1,
         "core_cost": 1,
     }
@@ -1328,6 +1342,8 @@ def parts_api_search():
             "description": p.get("description") or "",
             "average_cost": float(p.get("average_cost") or 0.0),
             "vendor_id": str(p["vendor_id"]) if p.get("vendor_id") else "",
+            "has_selling_price": bool(p.get("has_selling_price")),
+            "selling_price": float(p.get("selling_price") or 0.0),
             "core_has_charge": bool(p.get("core_has_charge", False)),
             "core_cost": float(p.get("core_cost") or 0.0),
         })
@@ -1374,6 +1390,8 @@ def parts_api_search():
                 "description": p.get("description") or "",
                 "average_cost": float(p.get("average_cost") or 0.0),
                 "vendor_id": str(p["vendor_id"]) if p.get("vendor_id") else "",
+                "has_selling_price": bool(p.get("has_selling_price")),
+                "selling_price": float(p.get("selling_price") or 0.0),
                 "core_has_charge": bool(p.get("core_has_charge", False)),
                 "core_cost": float(p.get("core_cost") or 0.0),
             })
@@ -2205,6 +2223,8 @@ def parts_api_get(part_id: str):
             "in_stock": int(part.get("in_stock") or 0),
             "do_not_track_inventory": bool(part.get("do_not_track_inventory")),
             "average_cost": float(part.get("average_cost") or 0.0),
+            "has_selling_price": bool(part.get("has_selling_price")),
+            "selling_price": float(part.get("selling_price") or 0.0),
             "core_has_charge": bool(part.get("core_has_charge", False)),
             "core_cost": float(part.get("core_cost") or 0.0),
             "misc_has_charge": bool(part.get("misc_has_charge", False)),
@@ -2399,6 +2419,11 @@ def parts_api_update(part_id: str):
     if average_cost < 0:
         return jsonify({"ok": False, "error": "Average cost cannot be negative"}), 400
 
+    has_selling_price = bool(data.get("has_selling_price", False))
+    selling_price = _parse_float(data.get("selling_price", 0.0), default=0.0)
+    if has_selling_price and selling_price < 0:
+        return jsonify({"ok": False, "error": "Selling price cannot be negative"}), 400
+
     do_not_track_inventory = bool(data.get("do_not_track_inventory", False))
     in_stock = _parse_int(data.get("in_stock", 0), default=0)
     if not do_not_track_inventory and in_stock < 0:
@@ -2466,6 +2491,8 @@ def parts_api_update(part_id: str):
             "location_id": location_oid,
             "do_not_track_inventory": bool(do_not_track_inventory),
             "average_cost": float(average_cost),
+            "has_selling_price": bool(has_selling_price),
+            "selling_price": float(selling_price) if has_selling_price else None,
             "core_has_charge": bool(core_has_charge),
             "core_cost": float(core_cost) if core_has_charge else None,
             "misc_has_charge": bool(misc_has_charge),

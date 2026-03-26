@@ -1457,6 +1457,9 @@
 		const coreCostGroup = document.getElementById('coreCostGroup');
 		const miscCheckbox = document.getElementById('miscChargeToggle');
 		const miscBodyParts = document.getElementById('miscChargesBody');
+		const sellingPriceCheckbox = document.getElementById('sellingPriceToggle');
+		const sellingPriceInput = document.getElementById('sellingPriceInput');
+		const sellingPriceGroup = document.getElementById('sellingPriceGroup');
 		const form = createPartModal.querySelector('form[action*="/parts/create"]');
 		function parsePartJsonAttr(raw) {
 			if (!raw) return null;
@@ -1517,6 +1520,10 @@
 			}
 
 			document.getElementById('miscChargesGroup').style.display = item.misc_has_charge ? '' : 'none';
+
+			if (sellingPriceCheckbox) sellingPriceCheckbox.checked = !!item.has_selling_price;
+			if (sellingPriceInput) sellingPriceInput.value = item.selling_price ?? 0;
+			syncSellingPriceVisibility();
 		}
 
 		async function loadPartIntoEditModal(partId) {
@@ -1548,6 +1555,16 @@
 			}
 		}
 
+		function syncSellingPriceVisibility() {
+			const show = !!(sellingPriceCheckbox && sellingPriceCheckbox.checked);
+			if (sellingPriceGroup) sellingPriceGroup.style.display = show ? '' : 'none';
+			if (sellingPriceInput) {
+				sellingPriceInput.disabled = !show;
+				if (!show) sellingPriceInput.value = '0';
+				if (show && String(sellingPriceInput.value || '').trim() === '') sellingPriceInput.value = '0';
+			}
+		}
+
 		function syncInStockVisibility() {
 			const hide = !!(doNotTrackInventoryCheckbox && doNotTrackInventoryCheckbox.checked);
 			if (inStockGroup) inStockGroup.style.display = hide ? 'none' : '';
@@ -1572,6 +1589,7 @@
 
 		doNotTrackInventoryCheckbox?.addEventListener('change', syncInStockVisibility);
 		coreCheckbox?.addEventListener('change', syncInStockVisibility);
+		sellingPriceCheckbox?.addEventListener('change', syncSellingPriceVisibility);
 
 		createPartModal.addEventListener('show.bs.modal', function(e) {
 			const trigger = e.relatedTarget;
@@ -1609,6 +1627,8 @@
 						in_stock: parseInt(inStockInput.value || '0'),
 						average_cost: parseFloat(averageCostInput.value || '0'),
 						do_not_track_inventory: !!(doNotTrackInventoryCheckbox && doNotTrackInventoryCheckbox.checked),
+						has_selling_price: !!(sellingPriceCheckbox && sellingPriceCheckbox.checked),
+						selling_price: parseFloat(sellingPriceInput?.value || '0'),
 						core_has_charge: coreCheckbox.checked,
 						core_cost: parseFloat(coreCostInput.value || '0'),
 						misc_has_charge: miscCheckbox.checked,
@@ -1662,6 +1682,7 @@
 			modalTitle.textContent = 'Create new part';
 			form.reset();
 			syncInStockVisibility();
+			syncSellingPriceVisibility();
 			if (coreCostGroup) coreCostGroup.style.display = 'none';
 			if (document.getElementById('miscChargesGroup')) {
 				document.getElementById('miscChargesGroup').style.display = 'none';
@@ -1669,6 +1690,7 @@
 		});
 
 		syncInStockVisibility();
+		syncSellingPriceVisibility();
 	}
 	}
 

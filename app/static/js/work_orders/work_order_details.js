@@ -1202,6 +1202,18 @@
     }
     if (cost) cost.value = (part.average_cost != null) ? String(part.average_cost) : "";
 
+    // If part has a fixed selling price, set it immediately and prevent markup auto-fill
+    const priceInput = tr.querySelector(".part-price");
+    if (part.has_selling_price && part.selling_price != null && Number.isFinite(toNum(part.selling_price))) {
+      if (priceInput) priceInput.value = String(round2(toNum(part.selling_price)));
+      tr.dataset.priceManuallyEdited = "1";
+      delete tr.dataset.priceAutofilled;
+    } else {
+      if (priceInput) priceInput.value = "";
+      delete tr.dataset.priceManuallyEdited;
+      delete tr.dataset.priceAutofilled;
+    }
+
     const coreCharge = (part?.core_has_charge && Number.isFinite(toNum(part?.core_cost)))
       ? Math.max(0, round2(toNum(part.core_cost)))
       : 0;
@@ -1294,10 +1306,13 @@
       }
     }
 
-    const price = tr.querySelector(".part-price");
-    if (price) price.value = "";
-    delete tr.dataset.priceAutofilled;
-    delete tr.dataset.priceManuallyEdited;
+    // Only clear price if no fixed selling price was set above
+    if (!part.has_selling_price || part.selling_price == null || !Number.isFinite(toNum(part.selling_price))) {
+      const price = tr.querySelector(".part-price");
+      if (price) price.value = "";
+      delete tr.dataset.priceAutofilled;
+      delete tr.dataset.priceManuallyEdited;
+    }
   }
 
   function fillRowAsOneTimePart(tr, searchText) {
