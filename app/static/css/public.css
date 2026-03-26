@@ -854,3 +854,8 @@ a:hover {
     padding: 0.34rem 0.5rem !important;
   }
 }
+
+/* Searchable select dropdowns (customer / unit) */
+.wo-search-dd-item:hover {
+  background: #f0f8f2;
+}

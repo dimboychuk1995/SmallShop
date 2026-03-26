@@ -21,14 +21,7 @@
       <!-- Customer select (NO reload) -->
       <div class="mb-3 mb-lg-4">
         <label class="form-label fw-semibold">Customer</label>
-        <select id="customerSelect" name="customer_id" class="form-select" required>
-          <option value="">-- Select customer --</option>
-          {% for c in customers %}
-            <option value="{{ c.id }}" {% if c.id == selected_customer_id %}selected{% endif %}>
-              {{ c.label }}
-            </option>
-          {% endfor %}
-        </select>
+        <input id="customerSelect" type="text" class="form-select" placeholder="-- Select customer --" autocomplete="off"/>
       </div>
 
       <!-- Unit select (NO reload) -->
@@ -36,14 +29,7 @@
         <div class="row g-3 g-lg-4 align-items-end">
           <div class="col-lg-6">
             <label class="form-label fw-semibold">Unit</label>
-            <select id="unitSelect" name="unit_id" class="form-select" {% if not selected_customer_id %}disabled{% endif %}>
-              <option value="">-- Select unit --</option>
-              {% for u in units %}
-                <option value="{{ u.id }}" {% if u.id == selected_unit_id %}selected{% endif %}>
-                  {{ u.label }}
-                </option>
-              {% endfor %}
-            </select>
+            <input id="unitSelect" type="text" class="form-select" placeholder="-- Select unit --" autocomplete="off" {% if not selected_customer_id %}disabled{% endif %}/>
           </div>
 
           <div class="col-lg-2">
@@ -131,6 +117,7 @@
 
     <!-- Data for JS -->
     <script type="application/json" id="customersData">{{ customers|tojson }}</script>
+    <script type="application/json" id="initialUnitsData">{{ units|tojson }}</script>
     <script type="application/json" id="laborRatesData">{{ labor_rates|tojson }}</script>
     <script type="application/json" id="mechanicsData">{{ mechanics|tojson }}</script>
     <script type="application/json" id="partsPricingRulesData">{{ parts_pricing_rules|tojson }}</script>
