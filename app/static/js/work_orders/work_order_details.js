@@ -1602,8 +1602,19 @@
   }
 
   // ---------------- customer/unit ----------------
+  let currentUnitItems = [];
+
   function setSelectOptions(selectEl, items, placeholder) {
     if (!selectEl) return;
+
+    // For input elements (searchable select), store items and reset display
+    if (selectEl.tagName === "INPUT") {
+      currentUnitItems = Array.isArray(items) ? items : [];
+      selectEl.value = "";
+      if (placeholder) selectEl.placeholder = placeholder;
+      return;
+    }
+
     selectEl.innerHTML = "";
 
     const ph = document.createElement("option");
@@ -1617,6 +1628,66 @@
       opt.textContent = String(it.label || "");
       selectEl.appendChild(opt);
     });
+  }
+
+  function ensureSearchDD(ddId) {
+    let dd = document.getElementById(ddId);
+    if (dd) return dd;
+    dd = document.createElement("div");
+    dd.id = ddId;
+    dd.style.position = "absolute";
+    dd.style.zIndex = "2000";
+    dd.style.background = "#fff";
+    dd.style.border = "1px solid rgba(0,0,0,.15)";
+    dd.style.borderRadius = "8px";
+    dd.style.boxShadow = "0 6px 18px rgba(0,0,0,.1)";
+    dd.style.maxHeight = "280px";
+    dd.style.overflow = "auto";
+    dd.style.display = "none";
+    dd.style.minWidth = "200px";
+    document.body.appendChild(dd);
+    return dd;
+  }
+
+  function ensureCustomerDD() { return ensureSearchDD("customerSearchDD"); }
+  function ensureUnitDD()     { return ensureSearchDD("unitSearchDD"); }
+
+  function placeSearchDD(dd, inputEl) {
+    const r = inputEl.getBoundingClientRect();
+    dd.style.left = `${window.scrollX + r.left}px`;
+    dd.style.top = `${window.scrollY + r.bottom + 4}px`;
+    dd.style.minWidth = `${r.width}px`;
+  }
+
+  function renderSearchDD(dd, items, selectedId, onSelect) {
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) {
+      dd.innerHTML = `<div style="padding:10px 12px;color:#6c757d;font-size:14px;">No matches</div>`;
+    } else {
+      dd.innerHTML = list.map((it, idx) => {
+        const isSel = String(it.id || "") === String(selectedId || "");
+        return `<div class="wo-search-dd-item" data-idx="${idx}"
+            style="padding:10px 12px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,.06);font-size:14px;${isSel ? "background:#f0f8f2;font-weight:600;" : ""}">
+          ${escapeText(String(it.label || ""))}
+        </div>`;
+      }).join("");
+    }
+    dd._items = list;
+    dd._onSelect = onSelect;
+  }
+
+  function showSearchDD(dd, inputEl, items, selectedId, onSelect) {
+    renderSearchDD(dd, items, selectedId, onSelect);
+    placeSearchDD(dd, inputEl);
+    dd.style.display = "block";
+  }
+
+  function hideSearchDD(dd) {
+    if (!dd) return;
+    dd.style.display = "none";
+    dd.innerHTML = "";
+    dd._items = [];
+    dd._onSelect = null;
   }
 
   async function fetchUnits(customerId) {
@@ -2597,13 +2668,12 @@
     });
 
     // initial enable state (before create)
-    setEditorEnabled(!!(unitSel && String(unitSel.value || "").trim()));
+    setEditorEnabled(!!(unitHidden && String(unitHidden.value || "").trim()));
 
     // customer/unit change (только пока НЕ создано)
     customerSel?.addEventListener("change", async function () {
-      const customerId = String(customerSel.value || "").trim();
+      const customerId = String(customerHidden?.value || "").trim();
       currentCustomerTaxable = getCustomerTaxable(customersData, customerId);
-      if (customerHidden) customerHidden.value = customerId;
       if (createUnitCustomerHidden) createUnitCustomerHidden.value = customerId;
       if (addUnitBtn) addUnitBtn.disabled = !customerId;
 
@@ -2615,7 +2685,6 @@
       if (unitSel) {
         unitSel.disabled = !customerId;
         setSelectOptions(unitSel, [], customerId ? "Loading…" : "-- Select unit --");
-        unitSel.value = "";
       }
       
       // Clear mileage when customer changes
@@ -2639,8 +2708,7 @@
     });
 
     unitSel?.addEventListener("change", async function () {
-      const unitId = String(unitSel.value || "").trim();
-      if (unitHidden) unitHidden.value = unitId;
+      const unitId = String(unitHidden?.value || "").trim();
       setEditorEnabled(!!unitId);
       
       // Clear mileage if no unit selected
@@ -2664,7 +2732,93 @@
       if (unitMileageHidden) unitMileageHidden.value = mileageValue;
     });
 
-    // dropdown
+    // ---------- searchable customer/unit inputs ----------
+    function openCustomerDD() {
+      if (customerSel.disabled) return;
+      const query = String(customerSel.value || "").trim().toLowerCase();
+      const filtered = customersData.filter(c =>
+        !query || String(c.label || "").toLowerCase().includes(query)
+      );
+      const customerDD = ensureCustomerDD();
+      showSearchDD(customerDD, customerSel, filtered, customerHidden?.value, function (it) {
+        customerHidden.value = String(it.id || "");
+        customerSel.value = String(it.label || "");
+        hideSearchDD(customerDD);
+        customerSel.dispatchEvent(new Event("change"));
+      });
+    }
+
+    const BLUR_RESTORE_DELAY = 150;
+
+    function restoreSearchInputLabel(inputEl, ddId, hiddenEl, items) {
+      setTimeout(function () {
+        const dd = document.getElementById(ddId);
+        if (dd && dd.style.display !== "none") return;
+        const selId = hiddenEl?.value || "";
+        if (selId) {
+          const found = items.find(x => String(x.id || "") === selId);
+          inputEl.value = found ? String(found.label || "") : "";
+        } else {
+          inputEl.value = "";
+        }
+      }, BLUR_RESTORE_DELAY);
+    }
+
+    function handleSearchDDMousedown(e, dd, inputEl) {
+      if (!dd || dd.style.display === "none") return false;
+      const item = e.target.closest(".wo-search-dd-item");
+      if (item && dd.contains(item)) {
+        e.preventDefault();
+        const idx = Number(item.dataset.idx);
+        const it = dd._items?.[idx];
+        if (it && typeof dd._onSelect === "function") dd._onSelect(it);
+        return true;
+      }
+      if (!dd.contains(e.target) && e.target !== inputEl) {
+        hideSearchDD(dd);
+      }
+      return false;
+    }
+
+    customerSel?.addEventListener("focus", openCustomerDD);
+    customerSel?.addEventListener("input", openCustomerDD);
+    customerSel?.addEventListener("blur", function () {
+      restoreSearchInputLabel(customerSel, "customerSearchDD", customerHidden, customersData);
+    });
+
+    function openUnitDD() {
+      if (unitSel.disabled) return;
+      const query = String(unitSel.value || "").trim().toLowerCase();
+      const filtered = currentUnitItems.filter(u =>
+        !query || String(u.label || "").toLowerCase().includes(query)
+      );
+      const unitDD = ensureUnitDD();
+      showSearchDD(unitDD, unitSel, filtered, unitHidden?.value, function (it) {
+        unitHidden.value = String(it.id || "");
+        unitSel.value = String(it.label || "");
+        hideSearchDD(unitDD);
+        unitSel.dispatchEvent(new Event("change"));
+      });
+    }
+
+    unitSel?.addEventListener("focus", openUnitDD);
+    unitSel?.addEventListener("input", openUnitDD);
+    unitSel?.addEventListener("blur", function () {
+      restoreSearchInputLabel(unitSel, "unitSearchDD", unitHidden, currentUnitItems);
+    });
+
+    document.addEventListener("mousedown", function (e) {
+      if (handleSearchDDMousedown(e, document.getElementById("customerSearchDD"), customerSel)) return;
+      handleSearchDDMousedown(e, document.getElementById("unitSearchDD"), unitSel);
+    });
+
+    document.addEventListener("scroll", function () {
+      if (!isWorkOrderPageAlive()) return;
+      hideSearchDD(document.getElementById("customerSearchDD"));
+      hideSearchDD(document.getElementById("unitSearchDD"));
+    }, { passive: true });
+
+
     const dd = ensureDropdown();
 
     blocksContainer.addEventListener("click", function (e) {
@@ -2801,7 +2955,7 @@
       setupMiscChargeButton(cloned);
       Array.from(blocksContainer.querySelectorAll(".wo-labor")).forEach((b, idx) => renumberBlock(b, idx));
 
-      const customerId = String(customerSel?.value || "").trim();
+      const customerId = String(customerHidden?.value || "").trim();
       const defaultRateCode = getCustomerDefaultLaborRate(customersData, customerId);
       applyDefaultLaborRateToBlock(cloned, defaultRateCode, true);
 
@@ -3052,22 +3206,34 @@
 
     // initial state
     if (addUnitBtn) {
-      const initialCustomerId = String(customerSel?.value || "").trim();
+      const initialCustomerId = String(customerHidden?.value || "").trim();
       addUnitBtn.disabled = !initialCustomerId;
     }
 
-    const initialCustomerId = String(customerSel?.value || "").trim();
+    const initialCustomerId = String(customerHidden?.value || "").trim();
     currentCustomerTaxable = getCustomerTaxable(customersData, initialCustomerId);
     const initialDefaultRateCode = getCustomerDefaultLaborRate(customersData, initialCustomerId);
     applyDefaultLaborRateToAll(blocksContainer, initialDefaultRateCode, true);
     recalcAll(blocksContainer, pricing, laborRates, shopSupplyPct);
+
+    // Initialize search input display values from hidden fields
+    const initialUnitsData = readJsonScript("initialUnitsData", []);
+    currentUnitItems = initialUnitsData;
+    if (customerSel && customerHidden && customerHidden.value) {
+      const found = customersData.find(c => String(c.id || "") === customerHidden.value);
+      if (found) customerSel.value = String(found.label || "");
+    }
+    if (unitSel && unitHidden && unitHidden.value) {
+      const found = initialUnitsData.find(u => String(u.id || "") === unitHidden.value);
+      if (found) unitSel.value = String(found.label || "");
+    }
 
     if (isCreated) {
       applyTotalsSnapshotToUi(blocksContainer, totalsSnapshot, shopSupplyPct);
       
       // ✅ Load unit mileage when editing an existing work order
       (async () => {
-        const selectedUnitId = String(unitSel?.value || "").trim();
+        const selectedUnitId = String(unitHidden?.value || "").trim();
         if (selectedUnitId) {
           const unitDetails = await fetchUnitDetails(selectedUnitId);
           if (unitDetails) {
