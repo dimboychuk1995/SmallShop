@@ -2,6 +2,105 @@
 {% block page_title %}Work Order Details{% endblock %}
 
 {% block app_content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
+<style>
+  .work-order-enhanced-select + .select2-container {
+    width: 100% !important;
+  }
+
+  .work-order-enhanced-select + .select2-container .select2-selection--single {
+    min-height: calc(1.5em + 0.75rem + 2px);
+    padding: 0.375rem 2.5rem 0.375rem 0.75rem;
+    border: 1px solid #c7d2ca;
+    border-radius: var(--radius-sm);
+    background: #fbfdfb;
+    color: var(--text);
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+  }
+
+  .work-order-enhanced-select + .select2-container .select2-selection__rendered {
+    padding-left: 0;
+    padding-right: 0;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  .work-order-enhanced-select + .select2-container .select2-selection__placeholder {
+    color: var(--muted);
+  }
+
+  .work-order-enhanced-select + .select2-container .select2-selection__arrow {
+    height: 100%;
+    right: 0.7rem;
+  }
+
+  .work-order-enhanced-select + .select2-container .select2-selection__arrow b {
+    border-color: #5c6b62 transparent transparent transparent;
+    border-width: 5px 4px 0 4px;
+  }
+
+  .work-order-enhanced-select + .select2-container--open .select2-selection--single,
+  .work-order-enhanced-select + .select2-container--focus .select2-selection--single {
+    border-color: #5b946f;
+    background: #ffffff;
+    box-shadow: 0 0 0 0.2rem rgba(31, 107, 67, 0.16);
+  }
+
+  .work-order-enhanced-select + .select2-container--disabled .select2-selection--single {
+    background: #e9ecef;
+    color: #6c757d;
+    cursor: not-allowed;
+    opacity: 1;
+  }
+
+  .work-order-enhanced-select + .select2-container--disabled .select2-selection__rendered {
+    color: #6c757d;
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown {
+    border: 1px solid #c7d2ca;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    box-shadow: 0 10px 26px rgba(21, 37, 28, 0.12);
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown .select2-search--dropdown {
+    padding: 0.55rem;
+    background: #f7faf5;
+    border-bottom: 1px solid #d7e0d6;
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown .select2-search__field {
+    border: 1px solid #c7d2ca;
+    border-radius: var(--radius-sm);
+    background: #ffffff;
+    color: var(--text);
+    padding: 0.45rem 0.7rem;
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown .select2-search__field:focus {
+    outline: none;
+    border-color: #5b946f;
+    box-shadow: 0 0 0 0.2rem rgba(31, 107, 67, 0.12);
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown .select2-results__option {
+    padding: 0.55rem 0.75rem;
+    color: var(--text);
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown .select2-results__option--highlighted.select2-results__option--selectable {
+    background: rgba(31, 107, 67, 0.12);
+    color: var(--primary-deep);
+  }
+
+  .select2-dropdown.ss-work-order-select2-dropdown .select2-results__option--selected {
+    background: #e8eee6;
+    color: var(--text);
+  }
+</style>
 <div class="card shadow border-0">
   <div class="card-body">
 
@@ -21,7 +120,7 @@
       <!-- Customer select (NO reload) -->
       <div class="mb-3 mb-lg-4">
         <label class="form-label fw-semibold">Customer</label>
-        <select id="customerSelect" name="customer_id" class="form-select" required>
+        <select id="customerSelect" name="customer_id" class="form-select work-order-enhanced-select" data-select-placeholder="-- Select customer --" required>
           <option value="">-- Select customer --</option>
           {% for c in customers %}
             <option value="{{ c.id }}" {% if c.id == selected_customer_id %}selected{% endif %}>
@@ -36,7 +135,7 @@
         <div class="row g-3 g-lg-4 align-items-end">
           <div class="col-lg-6">
             <label class="form-label fw-semibold">Unit</label>
-            <select id="unitSelect" name="unit_id" class="form-select" {% if not selected_customer_id %}disabled{% endif %}>
+            <select id="unitSelect" name="unit_id" class="form-select work-order-enhanced-select" data-select-placeholder="-- Select unit --" {% if not selected_customer_id %}disabled{% endif %}>
               <option value="">-- Select unit --</option>
               {% for u in units %}
                 <option value="{{ u.id }}" {% if u.id == selected_unit_id %}selected{% endif %}>
@@ -534,7 +633,9 @@
       </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/work_orders/work_order_details.js', v='20260317-work-order-email') }}"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="{{ url_for('static', filename='js/work_orders/work_order_details.js', v='20260326-work-order-select2') }}"></script>
 
   </div>
 </div>

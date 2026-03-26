@@ -1602,8 +1602,84 @@
   }
 
   // ---------------- customer/unit ----------------
+  function hasSelect2() {
+    return !!(window.jQuery && window.jQuery.fn && typeof window.jQuery.fn.select2 === "function");
+  }
+
+  function getSelectPlaceholder(selectEl, fallback) {
+    if (!selectEl) return fallback || "-- Select --";
+    const customPlaceholder = String(selectEl.dataset.selectPlaceholder || "").trim();
+    if (customPlaceholder) return customPlaceholder;
+    const firstOption = selectEl.options && selectEl.options.length > 0
+      ? String(selectEl.options[0].textContent || "").trim()
+      : "";
+    return firstOption || fallback || "-- Select --";
+  }
+
+  function rebuildEnhancedSelect(selectEl) {
+    if (!selectEl || !hasSelect2()) return;
+
+    const $select = window.jQuery(selectEl);
+    const currentValue = String(selectEl.value || "");
+    const placeholder = getSelectPlaceholder(selectEl);
+    const isDisabled = !!selectEl.disabled;
+
+    if ($select.data("select2")) {
+      $select.off(".woSelect2");
+      $select.select2("destroy");
+    }
+
+    $select.select2({
+      width: "100%",
+      placeholder,
+      minimumResultsForSearch: 0,
+      dropdownCssClass: "ss-work-order-select2-dropdown",
+      selectionCssClass: "ss-work-order-select2-selection",
+    });
+
+    $select.val(currentValue);
+    $select.prop("disabled", isDisabled);
+    $select.trigger("change.select2");
+
+    $select.on("select2:open.woSelect2", function () {
+      const searchField = document.querySelector(".select2-container--open .select2-search__field");
+      if (searchField) {
+        searchField.setAttribute("placeholder", "Search...");
+      }
+    });
+
+    $select.on("select2:select.woSelect2 select2:clear.woSelect2", function () {
+      selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  function syncEnhancedSelect(selectEl) {
+    if (!selectEl || !hasSelect2()) return;
+    const $select = window.jQuery(selectEl);
+    if (!$select.data("select2")) {
+      rebuildEnhancedSelect(selectEl);
+      return;
+    }
+
+    $select.prop("disabled", !!selectEl.disabled);
+    $select.trigger("change.select2");
+  }
+
+  function setSelectDisabled(selectEl, disabled) {
+    if (!selectEl) return;
+    selectEl.disabled = !!disabled;
+    syncEnhancedSelect(selectEl);
+  }
+
+  function setSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    selectEl.value = String(value || "");
+    syncEnhancedSelect(selectEl);
+  }
+
   function setSelectOptions(selectEl, items, placeholder) {
     if (!selectEl) return;
+    selectEl.dataset.selectPlaceholder = placeholder || "-- Select --";
     selectEl.innerHTML = "";
 
     const ph = document.createElement("option");
@@ -1617,6 +1693,8 @@
       opt.textContent = String(it.label || "");
       selectEl.appendChild(opt);
     });
+
+    rebuildEnhancedSelect(selectEl);
   }
 
   async function fetchUnits(customerId) {
@@ -1826,16 +1904,16 @@
       editor.style.pointerEvents = "";
       editor.style.opacity = "";
       // При редактировании разрешаем менять customer/unit
-      if (customerSel) customerSel.disabled = false;
-      if (unitSel) unitSel.disabled = false;
+      setSelectDisabled(customerSel, false);
+      setSelectDisabled(unitSel, false);
       if (addUnitBtn) addUnitBtn.disabled = false;
       if (addLaborBtn) addLaborBtn.disabled = false;
       document.querySelectorAll(".removeLaborBtn").forEach(b => { b.disabled = false; });
     } else {
       editor.style.pointerEvents = "none";
       editor.style.opacity = "0.75";
-      if (customerSel) customerSel.disabled = true;
-      if (unitSel) unitSel.disabled = true;
+      setSelectDisabled(customerSel, true);
+      setSelectDisabled(unitSel, true);
       if (addUnitBtn) addUnitBtn.disabled = true;
       if (addLaborBtn) addLaborBtn.disabled = true;
       document.querySelectorAll(".removeLaborBtn").forEach(b => { b.disabled = true; });
@@ -2103,6 +2181,9 @@
       editor, customerSel, unitSel, addUnitBtn, addLaborBtn,
       createBtn, editBtn, saveBtn, paidBtn, unpaidBtn, emailBtn
     };
+
+    rebuildEnhancedSelect(customerSel);
+    rebuildEnhancedSelect(unitSel);
 
     let targetAssignBlock = null;
 
@@ -2613,9 +2694,9 @@
 
       if (unitHidden) unitHidden.value = "";
       if (unitSel) {
-        unitSel.disabled = !customerId;
+        setSelectDisabled(unitSel, !customerId);
         setSelectOptions(unitSel, [], customerId ? "Loading…" : "-- Select unit --");
-        unitSel.value = "";
+        setSelectValue(unitSel, "");
       }
       
       // Clear mileage when customer changes
@@ -2627,7 +2708,7 @@
       if (!customerId || !unitSel) return;
       const units = await fetchUnits(customerId);
       setSelectOptions(unitSel, units, "-- Select unit --");
-      unitSel.disabled = false;
+      setSelectDisabled(unitSel, false);
 
       if (Array.isArray(units) && units.length === 0) {
         const createUnitModalEl = $("createUnitModal");
@@ -2834,8 +2915,8 @@
       }
 
       // created: customer/unit больше не меняем
-      if (customerSel) customerSel.disabled = true;
-      if (unitSel) unitSel.disabled = true;
+      setSelectDisabled(customerSel, true);
+      setSelectDisabled(unitSel, true);
       if (addUnitBtn) addUnitBtn.disabled = true;
 
       if (workOrderStatus === "paid") {
