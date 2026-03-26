@@ -12,3 +12,4 @@ def render_html_to_pdf(html: str) -> bytes:
     if result.err:
         raise RuntimeError(f"PDF generation failed (error code {result.err})")
     return buf.getvalue()
+ 

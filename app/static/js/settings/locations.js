@@ -251,22 +251,6 @@
       }
     }
 
-    function initLocationsAddressAutocomplete() {
-      if (typeof window.initAddressAutocomplete !== "function") {
-        return;
-      }
-      var createAddressInput = form ? form.querySelector('input[name="address"]') : null;
-      var editAddressInput = editForm ? editForm.querySelector('input[name="address"]') : null;
-      if (createAddressInput) window.initAddressAutocomplete(createAddressInput);
-      if (editAddressInput) window.initAddressAutocomplete(editAddressInput);
-    }
-
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", initLocationsAddressAutocomplete, { once: true });
-    } else {
-      initLocationsAddressAutocomplete();
-    }
-    window.addEventListener("smallshop:public-ready", initLocationsAddressAutocomplete);
   }
 
   if (document.readyState === "loading") {

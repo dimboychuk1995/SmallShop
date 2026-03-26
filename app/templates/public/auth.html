@@ -168,19 +168,5 @@
 
 {% block extra_scripts %}
 <script>
-(function () {
-  "use strict";
-  function initRegisterAutocomplete() {
-    var input = document.getElementById("company_address");
-    if (input && typeof initAddressAutocomplete === "function") {
-      initAddressAutocomplete(input);
-    }
-  }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initRegisterAutocomplete, { once: true });
-  } else {
-    initRegisterAutocomplete();
-  }
-})();
 </script>
 {% endblock %}

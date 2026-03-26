@@ -410,17 +410,4 @@
   bindGlobalDelegationOnce();
   bindPageLocalHandlers();
 
-  function initVendorAddressAutocomplete() {
-    var vendorEls = getVendorEls();
-    if (!vendorEls.addressInput) return;
-    if (typeof window.initAddressAutocomplete !== "function") return;
-    window.initAddressAutocomplete(vendorEls.addressInput);
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initVendorAddressAutocomplete, { once: true });
-  } else {
-    initVendorAddressAutocomplete();
-  }
-  window.addEventListener("smallshop:public-ready", initVendorAddressAutocomplete);
 })();
